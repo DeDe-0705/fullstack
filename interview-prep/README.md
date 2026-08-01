@@ -20,6 +20,7 @@
 ## 三、工程与性能
 
 - [前端工程化](./前端工程化.md) — Webpack/Vite原理、HMR、TreeShaking、CI/CD、组件库建设、Monorepo
+- [前端工程化-组件库实战](./前端工程化-组件库实战.md) — ui-kit 实操：组件库打包、git tag、CI/CD、npm 发布全链路（2026-08）
 - [性能优化体系](./性能优化体系.md) — 网络/构建/渲染/运行时四层优化、Core Web Vitals、虚拟列表
 
 ## 四、进阶专题
