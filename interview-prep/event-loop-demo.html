@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Loop 可视化 Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
+
+  .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .code-panel, .viz-panel { background: #1e293b; border-radius: 8px; padding: 16px; }
+  .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; }
+
+  pre { background: #0f172a; border-radius: 6px; padding: 12px; font-size: 13px; line-height: 1.6; overflow-x: auto; }
+  .kw { color: #c084fc; } .str { color: #34d399; } .cmt { color: #64748b; }
+  .blt { color: #38bdf8; } .num { color: #fbbf24; } .mtd { color: #fb923c; }
+
+  .btn-row { display: flex; gap: 8px; margin: 12px 0; }
+  button { padding: 8px 16px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  button:hover { border-color: #38bdf8; background: #0f172a; }
+  button.run { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  button.run:hover { background: #1d4ed8; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .output { background: #0f172a; border-radius: 6px; padding: 12px; min-height: 40px; font-family: "SF Mono", monospace; font-size: 13px; margin-top: 8px; }
+  .output-line { padding: 3px 0; animation: fadeIn .3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .queue-section { margin-bottom: 16px; }
+  .queue-label { font-size: 12px; color: #64748b; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .queue-label::before { content: ""; width: 8px; height: 8px; border-radius: 2px; }
+  .call-stack::before { background: #38bdf8; }
+  .micro-queue::before { background: #f472b6; }
+  .macro-queue::before { background: #fbbf24; }
+
+  .queue-box { border: 1px dashed #334155; border-radius: 6px; min-height: 48px; padding: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; transition: all .3s ease; }
+  .queue-item { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-family: "SF Mono", monospace; animation: popIn .3s ease; border: 1px solid; }
+  @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .item-stack { background: rgba(56,189,248,.15); border-color: rgba(56,189,248,.3); color: #38bdf8; }
+  .item-micro { background: rgba(244,114,182,.15); border-color: rgba(244,114,182,.3); color: #f472b6; }
+  .item-macro { background: rgba(251,191,36,.15); border-color: rgba(251,191,36,.3); color: #fbbf24; }
+
+  .highlight { animation: glow .5s ease; }
+  @keyframes glow { 50% { box-shadow: 0 0 12px rgba(56,189,248,.5); } }
+
+  .legend { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; margin-bottom: 16px; }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; }
+  .legend .l1::before { background: #38bdf8; }
+  .legend .l2::before { background: #f472b6; }
+  .legend .l3::before { background: #fbbf24; }
+
+  @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Event Loop 可视化</h1>
+  <p class="subtitle">逐步执行，观察调用栈、微任务队列、宏任务队列的变化</p>
+
+  <div class="legend">
+    <span class="l1">调用栈</span>
+    <span class="l2">微任务队列</span>
+    <span class="l3">宏任务队列</span>
+  </div>
+
+  <div class="main-grid">
+    <div class="code-panel">
+      <div class="panel-title">示例代码</div>
+<pre><span class="cmt">// 点击「逐步执行」查看每一步的队列状态</span>
+<span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'1: 同步'</span>);
+
+<span class="blt">setTimeout</span>(() => {
+  <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'2: 宏任务'</span>);
+}, <span class="num">0</span>);
+
+<span class="kw">Promise</span>.<span class="mtd">resolve</span>().<span class="mtd">then</span>(() => {
+  <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'3: 微任务'</span>);
+  <span class="blt">setTimeout</span>(() => {
+    <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'4: 宏任务(来自微任务)'</span>);
+  }, <span class="num">0</span>);
+});
+
+<span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'5: 同步'</span>);</pre>
+      <div class="btn-row">
+        <button class="run" onclick="step()" id="stepBtn">逐步执行</button>
+        <button onclick="resetAll()">重置</button>
+        <button class="run" onclick="autoRun()">自动运行</button>
+      </div>
+      <div class="output" id="output">
+        <div style="color:#64748b;font-size:13px;">点击「逐步执行」开始...</div>
+      </div>
+    </div>
+
+    <div class="viz-panel" id="vizPanel">
+      <div class="queue-section">
+        <div class="queue-label call-stack">调用栈 (Call Stack)</div>
+        <div class="queue-box" id="callStack"></div>
+      </div>
+      <div class="queue-section">
+        <div class="queue-label micro-queue">微任务队列 (Microtask Queue)</div>
+        <div class="queue-box" id="microQueue"></div>
+      </div>
+      <div class="queue-section">
+        <div class="queue-label macro-queue">宏任务队列 (Macrotask Queue)</div>
+        <div class="queue-box" id="macroQueue"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const steps = [
+  { desc: "执行 console.log('1: 同步')", stack: ["log('1')"], micro: [], macro: [], output: "1: 同步" },
+  { desc: "注册 setTimeout(宏任务)", stack: [], micro: [], macro: ["setTimeout(2)"], output: null },
+  { desc: "Promise.resolve() 同步返回; .then 入微任务队列", stack: [], micro: ["then(3)"], macro: ["setTimeout(2)"], output: null },
+  { desc: "执行 console.log('5: 同步')", stack: ["log('5')"], micro: ["then(3)"], macro: ["setTimeout(2)"], output: "5: 同步" },
+  { desc: "同步代码执行完，清空微任务: 执行 then(3)", stack: ["then(3)"], micro: [], macro: ["setTimeout(2)"], output: "3: 微任务" },
+  { desc: "then(3) 中注册 setTimeout(4)", stack: [], micro: [], macro: ["setTimeout(2)", "setTimeout(4)"], output: null },
+  { desc: "微任务队列为空，取宏任务: setTimeout(2)", stack: ["setTimeout(2)"], micro: [], macro: ["setTimeout(4)"], output: "2: 宏任务" },
+  { desc: "清空微任务(空)，取下一个宏任务: setTimeout(4)", stack: ["setTimeout(4)"], micro: [], macro: [], output: "4: 宏任务(来自微任务)" },
+  { desc: "队列清空，Event Loop 进入等待", stack: [], micro: [], macro: [], output: null },
+];
+
+let current = 0;
+
+function renderQueues(step) {
+  document.getElementById("callStack").innerHTML = step.stack.map(function(s) { return '<span class="queue-item item-stack">' + s + '</span>'; }).join("") || '<span style="font-size:12px;color:#475569;">空</span>';
+  document.getElementById("microQueue").innerHTML = step.micro.map(function(s) { return '<span class="queue-item item-micro">' + s + '</span>'; }).join("") || '<span style="font-size:12px;color:#475569;">空</span>';
+  document.getElementById("macroQueue").innerHTML = step.macro.map(function(s) { return '<span class="queue-item item-macro">' + s + '</span>'; }).join("") || '<span style="font-size:12px;color:#475569;">空</span>';
+}
+
+function step() {
+  if (current >= steps.length) {
+    document.getElementById("stepBtn").disabled = true;
+    return;
+  }
+  var s = steps[current];
+  renderQueues(s);
+  var vp = document.getElementById("vizPanel");
+  vp.classList.add("highlight");
+  setTimeout(function() { vp.classList.remove("highlight"); }, 500);
+
+  var out = document.getElementById("output");
+  var hint = out.querySelector("div[style]");
+  if (hint) hint.remove();
+  var line = '<div class="output-line">[第' + (current+1) + '步] <span style="color:#64748b">' + s.desc + '</span>';
+  if (s.output) line += ' → <span style="color:#34d399">' + s.output + '</span>';
+  line += '</div>';
+  out.insertAdjacentHTML("beforeend", line);
+  out.scrollTop = out.scrollHeight;
+  current++;
+  if (current >= steps.length) {
+    document.getElementById("stepBtn").textContent = "已结束";
+    document.getElementById("stepBtn").disabled = true;
+  }
+}
+
+function resetAll() {
+  current = 0;
+  document.getElementById("output").innerHTML = '<div style="color:#64748b;font-size:13px;">点击「逐步执行」开始...</div>';
+  document.getElementById("callStack").innerHTML = '<span style="font-size:12px;color:#475569;">空</span>';
+  document.getElementById("microQueue").innerHTML = '<span style="font-size:12px;color:#475569;">空</span>';
+  document.getElementById("macroQueue").innerHTML = '<span style="font-size:12px;color:#475569;">空</span>';
+  document.getElementById("stepBtn").textContent = "逐步执行";
+  document.getElementById("stepBtn").disabled = false;
+}
+
+function autoRun() {
+  resetAll();
+  var i = 0;
+  var iv = setInterval(function() {
+    if (i >= steps.length) { clearInterval(iv); return; }
+    step();
+    i++;
+  }, 700);
+}
+</script>
+</body>
+</html>

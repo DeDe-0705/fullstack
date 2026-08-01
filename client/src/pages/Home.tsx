@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useCounterStore } from '../stores/counter'
 import { api } from '../lib/api'
 
 export function Home() {
   const { count, increment, decrement, reset } = useCounterStore()
-  const [health, setHealth] = useState('')
-
-  useEffect(() => {
-    api.get<{ status: string }>('/health').then((d) => setHealth(d.status))
-  }, [])
+  // 服务端状态交给 TanStack Query，替代原来的 useEffect + useState 手写取数
+  const { data, isPending } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api.get<{ status: string }>('/health'),
+  })
 
   return (
     <div className="space-y-6">
@@ -20,7 +20,9 @@ export function Home() {
       {/* API 联调示例 */}
       <div className="p-4 bg-white rounded-lg border border-gray-200">
         <p className="text-sm text-gray-500">后端 API 状态</p>
-        <p className="text-lg font-semibold text-green-600">{health || '加载中...'}</p>
+        <p className="text-lg font-semibold text-green-600">
+          {isPending ? '加载中...' : data?.status}
+        </p>
       </div>
 
       {/* Zustand 计数器示例 */}

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浏览器渲染流程 交互图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .container { max-width: 1000px; width: 100%; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
+
+  .pipeline { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; }
+  .step { background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 16px 20px; text-align: center; transition: all .4s ease; cursor: pointer; min-width: 120px; }
+  .step:hover { border-color: #64748b; }
+  .step.active { border-color: #38bdf8; background: #1e3a5f; box-shadow: 0 0 20px rgba(56,189,248,.25); transform: scale(1.05); }
+  .step .num { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+  .step .name { font-size: 14px; font-weight: 600; }
+  .step .detail { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+  .arrow { font-size: 20px; color: #334155; margin: 0 4px; flex-shrink: 0; }
+
+  .detail-panel { background: #1e293b; border-radius: 8px; padding: 20px; margin-top: 24px; border: 1px solid #334155; min-height: 120px; }
+  .detail-panel h3 { font-size: 15px; margin-bottom: 8px; }
+  .detail-panel .desc { font-size: 13px; color: #94a3b8; line-height: 1.8; }
+  .detail-panel .tag-row { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid #334155; }
+  .t-reflow { background: rgba(239,68,68,.1); border-color: rgba(239,68,68,.3); color: #ef4444; }
+  .t-repaint { background: rgba(251,191,36,.1); border-color: rgba(251,191,36,.3); color: #fbbf24; }
+  .t-composite { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.3); color: #34d399; }
+
+  .bonus { background: #0f172a; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .bonus h4 { font-size: 12px; color: #64748b; text-transform: uppercase; margin-bottom: 8px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; }
+  .grid-item { padding: 8px 12px; background: #1e293b; border-radius: 6px; }
+  .grid-item .label { color: #94a3b8; margin-bottom: 2px; }
+  .grid-item .val { color: #e2e8f0; font-family: "SF Mono", monospace; font-size: 12px; }
+
+  @media (max-width: 768px) { .pipeline { flex-direction: column; } .arrow { transform: rotate(90deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>浏览器渲染流程</h1>
+  <p class="subtitle">点击每个阶段，查看详细说明和优化策略</p>
+
+  <div class="pipeline">
+    <div class="step" id="s1" onclick="select(1)">
+      <div class="num">①</div>
+      <div class="name">解析 HTML</div>
+      <div class="detail">构建 DOM 树</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step" id="s2" onclick="select(2)">
+      <div class="num">②</div>
+      <div class="name">解析 CSS</div>
+      <div class="detail">构建 CSSOM</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step" id="s3" onclick="select(3)">
+      <div class="num">③</div>
+      <div class="name">构建渲染树</div>
+      <div class="detail">DOM + CSSOM</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step" id="s4" onclick="select(4)">
+      <div class="num">④</div>
+      <div class="name">布局 Layout</div>
+      <div class="detail">计算位置尺寸</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step" id="s5" onclick="select(5)">
+      <div class="num">⑤</div>
+      <div class="name">绘制 Paint</div>
+      <div class="detail">生成图层位图</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step" id="s6" onclick="select(6)">
+      <div class="num">⑥</div>
+      <div class="name">合成 Composite</div>
+      <div class="detail">GPU 合并图层</div>
+    </div>
+  </div>
+
+  <div class="detail-panel" id="detailPanel">
+    <h3 id="detailTitle">点击上方阶段查看详情</h3>
+    <div class="desc" id="detailDesc"></div>
+    <div class="tag-row" id="detailTags"></div>
+  </div>
+
+  <div class="bonus">
+    <h4>操作对渲染的影响</h4>
+    <div class="grid-2">
+      <div class="grid-item">
+        <div class="label">修改 width/height/margin/padding</div>
+        <div class="val"><span class="tag t-reflow">回流(Reflow)</span> 最昂贵，重新 Layout+Paint+Composite</div>
+      </div>
+      <div class="grid-item">
+        <div class="label">修改 color/background/box-shadow</div>
+        <div class="val"><span class="tag t-repaint">重绘(Repaint)</span> 跳过 Layout，重绘图层</div>
+      </div>
+      <div class="grid-item">
+        <div class="label">修改 transform / opacity</div>
+        <div class="val"><span class="tag t-composite">仅合成</span> 跳过 Layout+Layout，直接 GPU 合成</div>
+      </div>
+      <div class="grid-item">
+        <div class="label">display:none vs visibility:hidden</div>
+        <div class="val">none: <span class="tag t-reflow">回流</span> + 不在渲染树。hidden: <span class="tag t-repaint">重绘</span> + 占位</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var details = {
+  1: {
+    title: "① 解析 HTML → DOM 树",
+    desc: "浏览器从网络或缓存中获取 HTML 字节流，经过<b>字节→字符→Token→节点→DOM树</b>的过程。解析过程遇到 &lt;script&gt; 会暂停，因为 JS 可能修改 DOM。遇到 &lt;link&gt; / &lt;style&gt; 时发起 CSS 请求但不阻塞 DOM 解析。",
+    tags: [{ text: "script 阻塞解析", cls: "t-reflow" }, { text: "CSS 不阻塞 DOM 构建", cls: "t-composite" }, { text: "defer/async 优化", cls: "t-repaint" }]
+  },
+  2: {
+    title: "② 解析 CSS → CSSOM 树",
+    desc: "CSS 是<b>渲染阻塞资源</b>。浏览器必须等 CSSOM 构建完成才能渲染页面——否则会出现无样式内容闪烁(FOUC)。CSS 选择器从右向左匹配（浏览器引擎优化），因此避免过深的嵌套选择器。",
+    tags: [{ text: "渲染阻塞", cls: "t-reflow" }, { text: "避免深层选择器", cls: "t-repaint" }, { text: "首屏 CSS 内联", cls: "t-composite" }]
+  },
+  3: {
+    title: "③ 构建渲染树（Render Tree）",
+    desc: "将 DOM 树和 CSSOM 树合并，遍历每个可见节点并计算其样式（层叠、继承、默认值）。<b>display:none 的节点不在渲染树中</b>（visibility:hidden 在但不可见，opacity:0 在且可交互）。同时生成 LayoutTree 和 LayerTree。",
+    tags: [{ text: "display:none 不在树中", cls: "t-reflow" }, { text: "样式计算(Computed Style)", cls: "t-repaint" }, { text: "层叠+继承", cls: "t-composite" }]
+  },
+  4: {
+    title: "④ 布局（Layout / Reflow）",
+    desc: "从渲染树的根节点开始，计算每个元素在视口中的<b>精确几何位置和尺寸</b>（盒模型）。这是一个递归过程，父元素尺寸影响子元素。读取 offsetHeight/getBoundingClientRect 等属性会触发强制同步布局（Forced Synchronous Layout）。",
+    tags: [{ text: "最昂贵阶段", cls: "t-reflow" }, { text: "避免读写交替", cls: "t-reflow" }, { text: "用 class 批量改样式", cls: "t-composite" }]
+  },
+  5: {
+    title: "⑤ 绘制（Paint）",
+    desc: "将布局结果绘制到多个<b>图层（Layer）</b>上，生成位图。绘制顺序：背景→边框→文字→前景。不同图层独立绘制，will-change 或 3D transform 会创建独立图层（合成层），但图层过多会增加内存。",
+    tags: [{ text: "图层分层", cls: "t-repaint" }, { text: "will-change 提层", cls: "t-composite" }, { text: "图层爆炸问题", cls: "t-reflow" }]
+  },
+  6: {
+    title: "⑥ 合成（Composite）",
+    desc: "GPU 将多个图层按 z-index 顺序合成为最终屏幕画面。<b>这是性能最优的动画方式</b>：transform 和 opacity 的动画直接在这一层处理，不触发前面的 Layout 和 Paint。这就是为什么推荐用 transform 做动画。",
+    tags: [{ text: "GPU 加速", cls: "t-composite" }, { text: "transform/opacity 动画", cls: "t-composite" }, { text: "requestAnimationFrame", cls: "t-repaint" }]
+  }
+};
+
+function select(n) {
+  // 更新步骤高亮
+  for (var i = 1; i <= 6; i++) {
+    var el = document.getElementById("s" + i);
+    if (i === n) el.classList.add("active");
+    else el.classList.remove("active");
+  }
+  // 更新详情
+  var d = details[n];
+  document.getElementById("detailTitle").innerHTML = d.title;
+  document.getElementById("detailDesc").innerHTML = d.desc;
+  var tagsHtml = d.tags.map(function(t) {
+    return '<span class="tag ' + t.cls + '">' + t.text + '</span>';
+  }).join("");
+  document.getElementById("detailTags").innerHTML = tagsHtml;
+}
+</script>
+</body>
+</html>

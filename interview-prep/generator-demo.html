@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generator 可视化</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel { background: #1e293b; border-radius: 8px; padding: 16px; }
+  .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; }
+
+  pre { background: #0f172a; border-radius: 6px; padding: 12px; font-size: 13px; line-height: 1.8; overflow-x: auto; }
+  .kw { color: #c084fc; } .str { color: #34d399; } .cmt { color: #64748b; }
+  .blt { color: #38bdf8; } .num { color: #fbbf24; } .mtd { color: #fb923c; }
+
+  .btn-row { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  button { padding: 8px 16px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  button:hover { border-color: #38bdf8; background: #0f172a; }
+  button.run { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  button.run:hover { background: #1d4ed8; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .code-highlight { display: inline; padding: 2px 6px; border-radius: 3px; }
+  .hl { background: rgba(56,189,248,.2); border: 1px solid rgba(56,189,248,.4); }
+
+  .viz-code { font-family: "SF Mono", monospace; font-size: 13px; line-height: 2; background: #0f172a; border-radius: 6px; padding: 14px; }
+  .line-exec { background: rgba(56,189,248,.12); border-left: 3px solid #38bdf8; padding-left: 10px; margin-left: -14px; }
+  .line-paused { background: rgba(244,114,182,.12); border-left: 3px solid #f472b6; padding-left: 10px; margin-left: -14px; }
+  .line-normal { padding-left: 10px; margin-left: -14px; }
+
+  .info-box { background: #0f172a; border-radius: 6px; padding: 12px; margin-top: 8px; font-size: 13px; }
+  .info-row { padding: 4px 0; display: flex; gap: 8px; }
+  .info-key { color: #64748b; min-width: 100px; }
+  .info-val { font-family: "SF Mono", monospace; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Generator 执行流程可视化</h1>
+  <p class="subtitle">看 function* 如何通过 yield 暂停和 next() 恢复</p>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-title">Generator 代码</div>
+      <div class="viz-code" id="vizCode"></div>
+      <div class="btn-row">
+        <button class="run" onclick="step()" id="stepBtn">next() →</button>
+        <button onclick="resetAll()">重置</button>
+        <button class="run" onclick="autoRun()">自动运行</button>
+      </div>
+      <div class="info-box" id="infoBox">
+        <div style="color:#64748b;font-size:13px;">点击 next() 开始执行...</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">执行日志</div>
+      <div id="logBox" style="font-family:'SF Mono',monospace;font-size:13px;background:#0f172a;border-radius:6px;padding:12px;min-height:100px;">
+        <div style="color:#475569;">等待执行...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 模拟的 Generator 代码行
+var codeLines = [
+  { text: "function* demo() {", type: "normal" },
+  { text: "  const a = yield 'Step 1';", type: "normal" },
+  { text: "  console.log('收到:', a);", type: "normal" },
+  { text: "  const b = yield 'Step 2';", type: "normal" },
+  { text: "  console.log('收到:', b);", type: "normal" },
+  { text: "  return 'Done';", type: "normal" },
+  { text: "}", type: "normal" },
+];
+
+// 每一步：高亮哪一行，显示什么状态，输出什么日志
+var steps = [
+  { line: 0, state: "const g = demo()<br>g.next() — 开始执行", log: '<div style="color:#38bdf8;">g = demo()</div>', info: { value: "Step 1", done: false } },
+  { line: 1, state: "暂停在 yield 'Step 1'<br>next(\"hello\") — 恢复执行，传入 'hello'", log: '<div style="color:#94a3b8;">yield → { value: "Step 1", done: false }</div>', info: { value: "Step 2", done: false, passIn: "hello" } },
+  { line: 2, state: "收到: hello<br>继续执行到下一个 yield", log: '<div style="color:#34d399;">收到: hello</div>', info: null },
+  { line: 3, state: "暂停在 yield 'Step 2'<br>next(\"world\") — 恢复执行，传入 'world'", log: '<div style="color:#94a3b8;">yield → { value: "Step 2", done: false }</div>', info: { value: "Done", done: true, passIn: "world" } },
+  { line: 4, state: "收到: world<br>执行 return 'Done'", log: '<div style="color:#34d399;">收到: world</div>', info: null },
+  { line: 5, state: "函数结束<br>g.next() → { value: 'Done', done: true }", log: '<div style="color:#38bdf8;">return → { value: "Done", done: true }</div>', info: { value: undefined, done: true } },
+  { line: -1, state: "Generator 已结束", log: '<div style="color:#fbbf24;">Generator finished</div>', info: null },
+];
+
+var current = 0;
+
+function renderCode(activeLine) {
+  var html = "";
+  for (var i = 0; i < codeLines.length; i++) {
+    var cls = "line-normal";
+    if (i === activeLine) cls = current % 2 === 0 ? "line-exec" : "line-paused";
+    html += '<div class="' + cls + '">' + codeLines[i].text + '</div>';
+  }
+  document.getElementById("vizCode").innerHTML = html;
+}
+
+function step() {
+  if (current >= steps.length) {
+    document.getElementById("stepBtn").disabled = true;
+    return;
+  }
+
+  var s = steps[current];
+  renderCode(s.line);
+
+  var info = document.getElementById("infoBox");
+  info.innerHTML = '<div class="info-row"><span class="info-key">状态</span><span class="info-val">' + s.state + '</span></div>';
+  if (s.info) {
+    info.innerHTML += '<div class="info-row"><span class="info-key">next() 返回</span><span class="info-val">value: ' + JSON.stringify(s.info.value) + ', done: ' + s.info.done + '</span></div>';
+    if (s.info.passIn) {
+      info.innerHTML += '<div class="info-row"><span class="info-key">传入值</span><span class="info-val">next("' + s.info.passIn + '")</span></div>';
+    }
+  }
+
+  var log = document.getElementById("logBox");
+  var hint = log.querySelector("div[style]");
+  if (hint) hint.remove();
+  log.insertAdjacentHTML("beforeend", s.log);
+  log.scrollTop = log.scrollHeight;
+
+  current++;
+  if (current >= steps.length) {
+    document.getElementById("stepBtn").textContent = "已完成";
+    document.getElementById("stepBtn").disabled = true;
+  }
+}
+
+function resetAll() {
+  current = 0;
+  renderCode(-1);
+  document.getElementById("infoBox").innerHTML = '<div style="color:#64748b;font-size:13px;">点击 next() 开始执行...</div>';
+  document.getElementById("logBox").innerHTML = '<div style="color:#475569;">等待执行...</div>';
+  document.getElementById("stepBtn").textContent = "next() →";
+  document.getElementById("stepBtn").disabled = false;
+}
+
+function autoRun() {
+  resetAll();
+  var i = 0;
+  var iv = setInterval(function() {
+    if (i >= steps.length) { clearInterval(iv); return; }
+    step();
+    i++;
+  }, 900);
+}
+
+// 初始状态
+renderCode(-1);
+</script>
+</body>
+</html>

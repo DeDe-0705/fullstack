@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Promise 执行流程可视化</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel { background: #1e293b; border-radius: 8px; padding: 16px; }
+  .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; }
+
+  pre { background: #0f172a; border-radius: 6px; padding: 12px; font-size: 13px; line-height: 1.6; overflow-x: auto; }
+  .kw { color: #c084fc; } .str { color: #34d399; } .cmt { color: #64748b; }
+  .blt { color: #38bdf8; } .num { color: #fbbf24; } .mtd { color: #fb923c; }
+
+  .btn-row { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  button { padding: 8px 16px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  button:hover { border-color: #38bdf8; background: #0f172a; }
+  button.run { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  button.run:hover { background: #1d4ed8; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .output { background: #0f172a; border-radius: 6px; padding: 12px; min-height: 44px; font-family: "SF Mono", monospace; font-size: 13px; margin-top: 8px; max-height: 200px; overflow-y: auto; }
+  .out-line { padding: 3px 0; animation: fadeIn .3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .phase { padding: 6px 12px; border-radius: 4px; margin: 4px 0; font-size: 13px; border: 1px solid #334155; }
+  .phase.sync { background: rgba(56,189,248,.1); border-color: rgba(56,189,248,.3); }
+  .phase.micro { background: rgba(244,114,182,.1); border-color: rgba(244,114,182,.3); }
+  .phase.macro { background: rgba(251,191,36,.1); border-color: rgba(251,191,36,.3); }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin: 0 2px; }
+  .t-blue { background: rgba(56,189,248,.15); color: #38bdf8; }
+  .t-pink { background: rgba(244,114,182,.15); color: #f472b6; }
+  .t-yellow { background: rgba(251,191,36,.15); color: #fbbf24; }
+  .t-green { background: rgba(52,211,153,.15); color: #34d399; }
+
+  .promise-card { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin: 6px 0; font-size: 13px; }
+  .promise-card .pc-id { color: #64748b; font-size: 11px; }
+  .promise-card .pc-state { font-weight: 600; }
+  .pc-pending { color: #fbbf24; }
+  .pc-fulfilled { color: #34d399; }
+  .pc-rejected { color: #ef4444; }
+
+  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Promise 执行流程可视化</h1>
+  <p class="subtitle">模拟浏览器真实执行顺序：同步代码 → 微任务 → 宏任务</p>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-title">示例代码</div>
+<pre><span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'A: 同步开始'</span>);
+
+<span class="kw">const</span> p = <span class="kw">new</span> <span class="blt">Promise</span>((resolve) => {
+  <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'B: Promise executor 同步'</span>);
+  resolve(<span class="str">'hello'</span>);
+});
+
+p.<span class="mtd">then</span>(v => <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'D: then 1 -'</span>, v));
+
+<span class="blt">setTimeout</span>(() => {
+  <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'F: 宏任务'</span>);
+}, <span class="num">0</span>);
+
+p.<span class="mtd">then</span>(v => <span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'E: then 2 -'</span>, v));
+
+<span class="blt">console</span>.<span class="mtd">log</span>(<span class="str">'C: 同步结束'</span>);</pre>
+      <div class="btn-row">
+        <button class="run" onclick="step()" id="stepBtn">逐步执行</button>
+        <button onclick="resetAll()">重置</button>
+        <button class="run" onclick="autoRun()">自动运行</button>
+      </div>
+      <div class="output" id="output"><div style="color:#64748b;font-size:13px;">点击逐步执行开始...</div></div>
+    </div>
+
+    <div class="panel" id="statePanel">
+      <div class="panel-title">运行时状态</div>
+      <div id="stateBox"><div style="color:#475569;font-size:13px;">等待执行...</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+var steps = [
+  { phase: "同步", desc: "执行 console.log('A: 同步开始')", output: "A: 同步开始", state: "" },
+  { phase: "同步", desc: "执行 new Promise(executor) — executor 同步执行", output: "B: Promise executor 同步", state: "p = Promise {<span class='pc-pending'>pending</span>} (刚创建，还没 then 注册)" },
+  { phase: "同步", desc: "resolve('hello') — p 变为 fulfilled", output: null, state: "p = Promise {<span class='pc-fulfilled'>fulfilled</span>: 'hello'}" },
+  { phase: "同步", desc: "p.then(cb1) — cb1 入微任务队列", output: null, state: "微任务队列: [then1-cb]<br>p = fulfilled" },
+  { phase: "同步", desc: "setTimeout(cb) — cb 入宏任务队列", output: null, state: "微任务队列: [then1-cb]<br>宏任务队列: [setTimeout-cb]" },
+  { phase: "同步", desc: "p.then(cb2) — cb2 入微任务队列", output: null, state: "微任务队列: [then1-cb, then2-cb]<br>宏任务队列: [setTimeout-cb]" },
+  { phase: "同步", desc: "执行 console.log('C: 同步结束')", output: "C: 同步结束", state: "微任务队列: [then1-cb, then2-cb]<br>宏任务队列: [setTimeout-cb]<br><br>同步代码执行完毕，开始清空微任务..." },
+  { phase: "微任务", desc: "执行 then1-cb: v => console.log('D: then 1 -', v)", output: "D: then 1 - hello", state: "微任务队列: [then2-cb]<br>宏任务队列: [setTimeout-cb]" },
+  { phase: "微任务", desc: "执行 then2-cb: v => console.log('E: then 2 -', v)", output: "E: then 2 - hello", state: "微任务队列清空<br>宏任务队列: [setTimeout-cb]<br><br>微任务清空，取一个宏任务..." },
+  { phase: "宏任务", desc: "执行 setTimeout-cb: console.log('F: 宏任务')", output: "F: 宏任务", state: "所有队列清空<br>Event Loop 进入等待" },
+];
+
+var current = 0;
+
+function step() {
+  if (current >= steps.length) { document.getElementById("stepBtn").disabled = true; return; }
+  var s = steps[current];
+  var out = document.getElementById("output");
+
+  var hint = out.querySelector("div[style]");
+  if (hint) hint.remove();
+
+  var tag = s.phase === "同步" ? '<span class="tag t-blue">同步</span>' :
+            s.phase === "微任务" ? '<span class="tag t-pink">微任务</span>' :
+            '<span class="tag t-yellow">宏任务</span>';
+
+  var html = '<div class="out-line">' + tag + ' <span style="color:#94a3b8">' + s.desc + '</span>';
+  if (s.output) html += ' → <span style="color:#34d399">' + s.output + '</span>';
+  html += '</div>';
+  out.insertAdjacentHTML("beforeend", html);
+  out.scrollTop = out.scrollHeight;
+
+  var sb = document.getElementById("stateBox");
+  sb.innerHTML = s.state ? '<div class="promise-card">' + s.state + '</div>' : '<div style="color:#475569;font-size:13px;">...</div>';
+
+  current++;
+  if (current >= steps.length) {
+    document.getElementById("stepBtn").textContent = "已结束";
+    document.getElementById("stepBtn").disabled = true;
+  }
+}
+
+function resetAll() {
+  current = 0;
+  document.getElementById("output").innerHTML = '<div style="color:#64748b;font-size:13px;">点击逐步执行开始...</div>';
+  document.getElementById("stateBox").innerHTML = '<div style="color:#475569;font-size:13px;">等待执行...</div>';
+  document.getElementById("stepBtn").textContent = "逐步执行";
+  document.getElementById("stepBtn").disabled = false;
+}
+
+function autoRun() {
+  resetAll();
+  var i = 0;
+  var iv = setInterval(function() {
+    if (i >= steps.length) { clearInterval(iv); return; }
+    step();
+    i++;
+  }, 800);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浏览器存储对比 Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+
+  .storage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .storage-card { background: #1e293b; border-radius: 8px; padding: 16px; border: 1px solid #334155; }
+  .sc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .sc-title { font-size: 15px; font-weight: 600; }
+  .sc-badge { font-size: 11px; padding: 3px 8px; border-radius: 4px; }
+  .bd-cookie { background: rgba(244,114,182,.15); color: #f472b6; }
+  .bd-local { background: rgba(56,189,248,.15); color: #38bdf8; }
+  .bd-session { background: rgba(52,211,153,.15); color: #34d399; }
+  .bd-idb { background: rgba(251,191,36,.15); color: #fbbf24; }
+
+  .sc-info { font-size: 12px; color: #94a3b8; margin-bottom: 8px; line-height: 1.6; }
+  .sc-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  input { flex: 1; padding: 8px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 13px; outline: none; }
+  input:focus { border-color: #38bdf8; }
+  button { padding: 8px 14px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; white-space: nowrap; }
+  button:hover { border-color: #38bdf8; background: #0f172a; }
+  button.danger { border-color: #ef4444; color: #ef4444; }
+  button.danger:hover { background: rgba(239,68,68,.1); }
+
+  .value-display { background: #0f172a; border-radius: 6px; padding: 10px; font-family: "SF Mono", monospace; font-size: 12px; min-height: 36px; word-break: break-all; color: #94a3b8; margin-top: 8px; }
+  .value-display .val { color: #e2e8f0; }
+
+  .event-log { background: #0f172a; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .event-log h3 { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .log-entry { font-family: "SF Mono", monospace; font-size: 12px; padding: 4px 0; border-bottom: 1px solid #1e293b; animation: fadeIn .3s; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .log-time { color: #64748b; }
+
+  .comparison-table { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 20px; font-size: 12px; }
+  .ct-header { color: #64748b; font-weight: 600; padding: 8px 0; border-bottom: 1px solid #334155; }
+  .ct-cell { padding: 6px 0; border-bottom: 1px solid #1e293b; }
+  .ct-cell .icon { margin-right: 4px; }
+
+  @media (max-width: 768px) { .storage-grid { grid-template-columns: 1fr; } .comparison-table { grid-template-columns: repeat(3, 1fr); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>浏览器存储对比 Demo</h1>
+  <p class="subtitle">直接操作 Cookie / localStorage / sessionStorage / IndexedDB，观察各自行为</p>
+
+  <div class="storage-grid">
+    <!-- Cookie -->
+    <div class="storage-card">
+      <div class="sc-header">
+        <span class="sc-title">Cookie</span>
+        <span class="sc-badge bd-cookie">~4KB</span>
+      </div>
+      <div class="sc-info">随请求自动发送 · 可设 HttpOnly/Secure/SameSite · 有过期时间</div>
+      <div class="sc-row">
+        <input type="text" placeholder="键" id="cookieKey" value="test_cookie">
+        <input type="text" placeholder="值" id="cookieVal" value="hello">
+      </div>
+      <div class="sc-row">
+        <button onclick="setCookie()">写入</button>
+        <button onclick="getCookie()">读取</button>
+        <button class="danger" onclick="delCookie()">删除</button>
+      </div>
+      <div class="value-display" id="cookieDisplay">当前 Cookie: <span class="val"></span></div>
+    </div>
+
+    <!-- localStorage -->
+    <div class="storage-card">
+      <div class="sc-header">
+        <span class="sc-title">localStorage</span>
+        <span class="sc-badge bd-local">~5-10MB</span>
+      </div>
+      <div class="sc-info">永久存储 · 同源共享 · 不随请求发送 · storage 事件跨 Tab 通信</div>
+      <div class="sc-row">
+        <input type="text" placeholder="键" id="lsKey" value="theme">
+        <input type="text" placeholder="值" id="lsVal" value="dark">
+      </div>
+      <div class="sc-row">
+        <button onclick="setLs()">写入</button>
+        <button onclick="getLs()">读取</button>
+        <button class="danger" onclick="delLs()">删除</button>
+      </div>
+      <div class="value-display" id="lsDisplay">当前值: <span class="val"></span></div>
+    </div>
+
+    <!-- sessionStorage -->
+    <div class="storage-card">
+      <div class="sc-header">
+        <span class="sc-title">sessionStorage</span>
+        <span class="sc-badge bd-session">~5-10MB</span>
+      </div>
+      <div class="sc-info">Tab 级隔离 · 关闭 Tab 自动清除 · 新 Tab 不共享 · 适合表单草稿</div>
+      <div class="sc-row">
+        <input type="text" placeholder="键" id="ssKey" value="draft">
+        <input type="text" placeholder="值" id="ssVal" value="unsaved">
+      </div>
+      <div class="sc-row">
+        <button onclick="setSs()">写入</button>
+        <button onclick="getSs()">读取</button>
+        <button class="danger" onclick="delSs()">删除</button>
+      </div>
+      <div class="value-display" id="ssDisplay">当前值: <span class="val"></span></div>
+    </div>
+
+    <!-- IndexedDB -->
+    <div class="storage-card">
+      <div class="sc-header">
+        <span class="sc-title">IndexedDB</span>
+        <span class="sc-badge bd-idb">无上限</span>
+      </div>
+      <div class="sc-info">异步不阻塞 · 索引查询 · 结构化克隆 · 支持事务 · 适合大数据</div>
+      <div class="sc-row">
+        <input type="text" placeholder="键 (数字)" id="idbId" value="1">
+        <input type="text" placeholder="值 (JSON)" id="idbVal" value='{"name":"Alice","score":95}'>
+      </div>
+      <div class="sc-row">
+        <button onclick="setIdb()">写入</button>
+        <button onclick="getIdb()">读取</button>
+        <button class="danger" onclick="delIdb()">删除</button>
+      </div>
+      <div class="value-display" id="idbDisplay">当前值: <span class="val"></span></div>
+    </div>
+  </div>
+
+  <!-- 对比表 -->
+  <div class="comparison-table" style="margin-top:24px;background:#1e293b;border-radius:8px;padding:16px;">
+    <div class="ct-header">特性</div><div class="ct-header">Cookie</div><div class="ct-header">localStorage</div><div class="ct-header">sessionStorage</div><div class="ct-header">IndexedDB</div>
+    <div class="ct-cell">容量</div><div class="ct-cell">~4KB</div><div class="ct-cell">~5MB</div><div class="ct-cell">~5MB</div><div class="ct-cell">无上限</div>
+    <div class="ct-cell">生命周期</div><div class="ct-cell">可设过期</div><div class="ct-cell">永久</div><div class="ct-cell">Tab关闭</div><div class="ct-cell">永久</div>
+    <div class="ct-cell">随请求发送</div><div class="ct-cell" style="color:#34d399;">是</div><div class="ct-cell" style="color:#ef4444;">否</div><div class="ct-cell" style="color:#ef4444;">否</div><div class="ct-cell" style="color:#ef4444;">否</div>
+    <div class="ct-cell">API 类型</div><div class="ct-cell">同步</div><div class="ct-cell">同步</div><div class="ct-cell">同步</div><div class="ct-cell" style="color:#38bdf8;">异步</div>
+    <div class="ct-cell">跨Tab通信</div><div class="ct-cell" style="color:#34d399;">是</div><div class="ct-cell" style="color:#34d399;">storage事件</div><div class="ct-cell" style="color:#ef4444;">否</div><div class="ct-cell">手动实现</div>
+  </div>
+
+  <!-- 事件日志 -->
+  <div class="event-log">
+    <h3>storage 事件日志（监听 localStorage 跨 Tab 变化）</h3>
+    <div id="eventLog"><div style="color:#475569;font-size:12px;">打开另一个同源 Tab 修改 localStorage，这里会收到事件...</div></div>
+  </div>
+</div>
+
+<script>
+// === Cookie ===
+function setCookie() {
+  var k = document.getElementById("cookieKey").value;
+  var v = document.getElementById("cookieVal").value;
+  document.cookie = k + "=" + encodeURIComponent(v) + ";path=/;max-age=3600;SameSite=Lax";
+  showCookie();
+}
+function getCookie() { showCookie(); }
+function delCookie() {
+  var k = document.getElementById("cookieKey").value;
+  document.cookie = k + "=;path=/;max-age=0";
+  showCookie();
+}
+function showCookie() {
+  var cookies = document.cookie.split("; ").reduce(function(acc, pair) {
+    var parts = pair.split("=");
+    acc[parts[0]] = decodeURIComponent(parts[1]);
+    return acc;
+  }, {});
+  var k = document.getElementById("cookieKey").value;
+  document.getElementById("cookieDisplay").innerHTML = "当前 Cookie 数量: <span class='val'>" + Object.keys(cookies).length + "</span><br>[" + k + "]: <span class='val'>" + (cookies[k] || "(无)") + "</span>";
+}
+
+// === localStorage ===
+function setLs() {
+  var k = document.getElementById("lsKey").value;
+  var v = document.getElementById("lsVal").value;
+  localStorage.setItem(k, v);
+  showLs();
+}
+function getLs() { showLs(); }
+function delLs() {
+  var k = document.getElementById("lsKey").value;
+  localStorage.removeItem(k);
+  showLs();
+}
+function showLs() {
+  var k = document.getElementById("lsKey").value;
+  document.getElementById("lsDisplay").innerHTML = "[" + k + "]: <span class='val'>" + (localStorage.getItem(k) || "(无)") + "</span>";
+}
+
+// === sessionStorage ===
+function setSs() {
+  var k = document.getElementById("ssKey").value;
+  var v = document.getElementById("ssVal").value;
+  sessionStorage.setItem(k, v);
+  showSs();
+}
+function getSs() { showSs(); }
+function delSs() {
+  var k = document.getElementById("ssKey").value;
+  sessionStorage.removeItem(k);
+  showSs();
+}
+function showSs() {
+  var k = document.getElementById("ssKey").value;
+  document.getElementById("ssDisplay").innerHTML = "[" + k + "]: <span class='val'>" + (sessionStorage.getItem(k) || "(无)") + "</span>";
+}
+
+// === IndexedDB ===
+var db = null;
+(function initIdb() {
+  var req = indexedDB.open("DemoDB", 1);
+  req.onupgradeneeded = function(e) {
+    var db = e.target.result;
+    if (!db.objectStoreNames.contains("items")) {
+      db.createObjectStore("items", { keyPath: "id" });
+    }
+  };
+  req.onsuccess = function(e) { db = e.target.result; };
+  req.onerror = function() { console.error("IndexedDB init failed"); };
+})();
+
+function setIdb() {
+  var id = parseInt(document.getElementById("idbId").value);
+  try {
+    var val = JSON.parse(document.getElementById("idbVal").value);
+  } catch(e) {
+    document.getElementById("idbDisplay").innerHTML = "<span style='color:#ef4444;'>JSON 格式错误</span>";
+    return;
+  }
+  if (!db) { document.getElementById("idbDisplay").innerHTML = "<span style='color:#fbbf24;'>IndexedDB 初始化中...</span>"; return; }
+  var tx = db.transaction("items", "readwrite");
+  var store = tx.objectStore("items");
+  store.put({ id: id, data: val });
+  tx.oncomplete = function() { showIdb(); };
+}
+function getIdb() {
+  if (!db) return;
+  var id = parseInt(document.getElementById("idbId").value);
+  var tx = db.transaction("items", "readonly");
+  var store = tx.objectStore("items");
+  var req = store.get(id);
+  req.onsuccess = function() {
+    document.getElementById("idbDisplay").innerHTML = "[" + id + "]: <span class='val'>" + (req.result ? JSON.stringify(req.result.data) : "(无)") + "</span>";
+  };
+}
+function delIdb() {
+  if (!db) return;
+  var id = parseInt(document.getElementById("idbId").value);
+  var tx = db.transaction("items", "readwrite");
+  var store = tx.objectStore("items");
+  store.delete(id);
+  tx.oncomplete = function() { showIdb(); };
+}
+function showIdb() { getIdb(); }
+
+// === storage 事件 ===
+window.addEventListener("storage", function(e) {
+  var log = document.getElementById("eventLog");
+  var hints = log.querySelectorAll("div[style]");
+  hints.forEach(function(h) { h.remove(); });
+  var now = new Date();
+  var time = now.getHours().toString().padStart(2,"0") + ":" + now.getMinutes().toString().padStart(2,"0") + ":" + now.getSeconds().toString().padStart(2,"0");
+  log.insertAdjacentHTML("afterbegin", '<div class="log-entry"><span class="log-time">' + time + '</span> 键: ' + e.key + ' | 旧值: ' + (e.oldValue || "(空)") + ' → 新值: ' + (e.newValue || "(空)") + ' | URL: ' + e.url + '</div>');
+});
+
+// 初始显示
+showCookie(); showLs(); showSs();
+</script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTTP 缓存决策流程</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .container { max-width: 900px; width: 100%; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
+
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .node {
+    padding: 14px 24px; border-radius: 8px; font-size: 14px; font-weight: 500;
+    border: 2px solid #334155; background: #1e293b; text-align: center;
+    transition: all .3s ease; cursor: default; min-width: 360px;
+  }
+  .node.active { border-color: #38bdf8; background: #1e3a5f; box-shadow: 0 0 16px rgba(56,189,248,.3); }
+
+  .node.question { border-color: #fbbf24; background: #29240e; }
+  .node.cache-hit { border-color: #34d399; background: #0a2e1f; }
+  .node.server-hit { border-color: #f472b6; background: #2e1020; }
+  .node.server-new { border-color: #fb923c; background: #2e1a0a; }
+
+  .node .label { font-size: 15px; }
+  .node .detail { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+
+  .arrow-row { display: flex; justify-content: center; gap: 16px; margin: 6px 0; }
+  .arrow { font-size: 12px; color: #64748b; padding: 4px 12px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; min-width: 120px; text-align: center; }
+  .arrow.yes { border-color: #34d399; color: #34d399; }
+  .arrow.no { border-color: #ef4444; color: #ef4444; }
+
+  .connector { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .connector .line { width: 2px; height: 16px; background: #334155; }
+  .connector .label-text { font-size: 11px; color: #64748b; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin: 0 2px; }
+  .tag-blue { background: rgba(56,189,248,.15); color: #38bdf8; }
+  .tag-green { background: rgba(52,211,153,.15); color: #34d399; }
+  .tag-pink { background: rgba(244,114,182,.15); color: #f472b6; }
+
+  .legend { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; margin-bottom: 20px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+  .dot-question { background: #fbbf24; }
+  .dot-cache { background: #34d399; }
+  .dot-server { background: #f472b6; }
+  .dot-new { background: #fb923c; }
+
+  .info-panel { background: #1e293b; border-radius: 8px; padding: 16px; margin-top: 24px; }
+  .info-panel h3 { font-size: 13px; color: #64748b; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1e293b; font-size: 13px; }
+  .info-row .key { color: #94a3b8; }
+  .info-row .val { font-family: "SF Mono", monospace; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>HTTP 缓存决策流程</h1>
+  <p class="subtitle">浏览器请求资源时的完整缓存判断链路</p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot dot-question"></div>判断节点</div>
+    <div class="legend-item"><div class="legend-dot dot-cache"></div>直接使用缓存</div>
+    <div class="legend-item"><div class="legend-dot dot-server"></div>304 协商缓存</div>
+    <div class="legend-item"><div class="legend-dot dot-new"></div>200 获取新内容</div>
+  </div>
+
+  <div class="flow" id="flow">
+    <div class="node question" id="n1" onclick="highlight('n1')">
+      <div class="label">浏览器发起请求</div>
+      <div class="detail">GET /app.js</div>
+    </div>
+    <div class="connector"><div class="line"></div></div>
+    <div class="node" id="n2" onclick="highlight('n2')">
+      <div class="label">检查 Cache-Control</div>
+      <div class="detail">是否有 <span class="tag tag-blue">no-store</span>？</div>
+    </div>
+    <div class="arrow-row">
+      <div class="arrow yes">是 → 直连服务器</div>
+      <div class="arrow no">否 ↓</div>
+    </div>
+    <div class="node question" id="n3" onclick="highlight('n3')">
+      <div class="label">强缓存检查</div>
+      <div class="detail"><span class="tag tag-green">max-age</span> 或 <span class="tag tag-green">Expires</span> 是否过期？</div>
+    </div>
+    <div class="arrow-row">
+      <div class="arrow no">未过期 →</div>
+      <div class="arrow yes">过期 ↓</div>
+    </div>
+    <div style="display:flex;gap:80px;align-items:flex-start;">
+      <div class="node cache-hit" id="n4" onclick="highlight('n4')">
+        <div class="label">✅ 直接使用缓存</div>
+        <div class="detail">200 (from disk/memory cache)</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="node question" id="n5" onclick="highlight('n5')">
+          <div class="label">协商缓存检查</div>
+          <div class="detail">有 <span class="tag tag-pink">ETag</span> 或 <span class="tag tag-pink">Last-Modified</span>？</div>
+        </div>
+        <div class="arrow-row" style="margin-top:6px;">
+          <div class="arrow no">无 →</div>
+          <div class="arrow yes">有 ↓</div>
+        </div>
+        <div style="display:flex;gap:24px;">
+          <div class="node server-new" id="n7" onclick="highlight('n7')">
+            <div class="label">200 获取新内容</div>
+            <div class="detail">更新本地缓存</div>
+          </div>
+          <div class="connector" style="align-items:center;margin-top:-28px;"><div style="width:2px;height:28px;background:#334155;"></div></div>
+          <div class="node question" id="n6" onclick="highlight('n6')">
+            <div class="label">带条件头发送请求</div>
+            <div class="detail">If-None-Match / If-Modified-Since</div>
+          </div>
+        </div>
+        <div class="arrow-row" style="margin-top:6px;">
+          <div class="arrow yes">资源未变 →</div>
+          <div class="arrow no">资源变了 ↓</div>
+        </div>
+        <div style="display:flex;gap:24px;">
+          <div class="node server-hit" id="n8" onclick="highlight('n8')">
+            <div class="label">304 Not Modified</div>
+            <div class="detail">使用本地缓存，更新缓存时间</div>
+          </div>
+          <div class="node server-new" id="n9" onclick="highlight('n9')">
+            <div class="label">200 返回新内容</div>
+            <div class="detail">更新 ETag + 缓存</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-panel">
+    <h3>头部速查</h3>
+    <div class="info-row"><span class="key">Cache-Control: max-age=3600</span><span class="val">缓存 3600 秒（强缓存）</span></div>
+    <div class="info-row"><span class="key">Cache-Control: no-cache</span><span class="val">每次验证（走协商缓存）</span></div>
+    <div class="info-row"><span class="key">Cache-Control: no-store</span><span class="val">完全不缓存</span></div>
+    <div class="info-row"><span class="key">ETag: "abc123"</span><span class="val">内容哈希，精确验证</span></div>
+    <div class="info-row"><span class="key">Last-Modified: Wed, 21 Jul 2026...</span><span class="val">文件修改时间，秒级精度</span></div>
+  </div>
+</div>
+
+<script>
+function highlight(id) {
+  document.querySelectorAll(".node").forEach(function(n) { n.classList.remove("active"); });
+  document.getElementById(id).classList.add("active");
+}
+</script>
+</body>
+</html>

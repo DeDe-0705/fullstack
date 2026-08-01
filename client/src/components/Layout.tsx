@@ -14,6 +14,14 @@ export function Layout() {
             首页
           </NavLink>
           <NavLink
+            to="/posts"
+            className={({ isActive }) =>
+              `text-sm font-medium ${isActive ? 'text-indigo-600' : 'text-gray-600 hover:text-gray-900'}`
+            }
+          >
+            帖子
+          </NavLink>
+          <NavLink
             to="/about"
             className={({ isActive }) =>
               `text-sm font-medium ${isActive ? 'text-indigo-600' : 'text-gray-600 hover:text-gray-900'}`
