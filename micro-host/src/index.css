@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* wujie 的 custom element 默认没有尺寸；不撑满容器时 shadow 内容会渲染在 0 高度区域里，表现为全白 */
+wujie-app {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: translateZ(0);
+}
