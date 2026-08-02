@@ -67,5 +67,9 @@ pnpm build && pnpm exec standard-version --first-release
 # 后续发布：rollup 构建（含类型检查）→ 自动 bump 版本 + 更新 CHANGELOG + 提交 + 打 tag
 pnpm release        # 构建失败即中断；可加 --dry-run 预览
 
-git push --follow-tags && npm publish   # prepublishOnly 会自动再 build 一次
+# 灰度 / 预发布：0.2.0-beta.0 → 0.2.0-beta.1 → ... 逐次递增
+pnpm release:beta
+git push --follow-tags && npm publish --tag beta   # 发到 beta dist-tag，不影响 latest
+
+git push --follow-tags && npm publish   # 正式版；prepublishOnly 会自动再 build 一次
 ```

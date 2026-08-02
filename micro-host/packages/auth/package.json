@@ -19,6 +19,7 @@
   "scripts": {
     "build": "rollup -c",
     "release": "pnpm run build && standard-version",
+    "release:beta": "pnpm run build && standard-version --prerelease beta",
     "prepublishOnly": "pnpm run build"
   },
   "keywords": [

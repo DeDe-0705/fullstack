@@ -1,7 +1,7 @@
-// 直接复用 packages/auth 的源码（同一仓库，免去 link 步骤），
-// 打包发布后子应用可通过 npm 包 `@king-dede/auth` 引入同一套逻辑。
-import { createAuth } from '../../packages/auth/src/index'
-import type { AuthAdapter } from '../../packages/auth/src/index'
+// 通过 vite/tsconfig 别名 @king-dede/auth 直接引用本地包源码（免去 link），
+// 与子应用发布后从 npm 引入的写法完全一致。
+import { createAuth } from '@king-dede/auth'
+import type { AuthAdapter } from '@king-dede/auth'
 
 const mockUser = {
   id: 'u001',
@@ -51,4 +51,4 @@ export {
   type AuthOptions,
   type LoginResult,
   type TokenBundle,
-} from '../../packages/auth/src/index'
+} from '@king-dede/auth'
