@@ -1,0 +1,41 @@
+{
+  "name": "@king-dede/auth",
+  "version": "0.1.0",
+  "description": "微前端场景下的轻量登录鉴权工具：token 管理 + 跨应用登录态广播",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "release": "pnpm run build && standard-version",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "micro-frontend",
+    "auth",
+    "token",
+    "wujie"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.2",
+    "rollup": "^4.40.0",
+    "standard-version": "^9.5.0",
+    "tslib": "^2.8.1",
+    "typescript": "~5.8.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

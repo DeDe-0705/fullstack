@@ -1,40 +1,37 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-
-export interface MockUser {
-  id: string
-  name: string
-  roles: string[]
-}
+import { auth } from '../auth'
+import type { AuthUser } from '../auth'
 
 interface AuthState {
+  /** accessToken（wujie props 透传给子应用用；子应用也可直接引 @king-dede/auth） */
   token: string | null
-  user: MockUser | null
+  user: AuthUser | null
   loading: boolean
-  /** mock 登录：不接 server，先验证父应用鉴权壳 */
   login: () => Promise<void>
   logout: () => void
 }
 
-const mockUser: MockUser = {
-  id: 'u001',
-  name: '王德师',
-  roles: ['admin', 'hrbp', 'manager', 'employee'],
-}
+/**
+ * 登录态读写统一交给 @king-dede/auth（见 src/auth），
+ * store 只做 React 侧的状态镜像：subscribe 同步 token/user，
+ * 事件广播（login/logout/token-refreshed/...）由包内 bus 统一负责。
+ */
+export const useAuthStore = create<AuthState>()((set) => {
+  auth.subscribe(({ token, user }) => set({ token: token?.accessToken ?? null, user }))
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      token: null,
-      user: null,
-      loading: false,
-      login: async () => {
-        set({ loading: true })
-        await new Promise((resolve) => setTimeout(resolve, 300))
-        set({ token: 'mock-token', user: mockUser, loading: false })
-      },
-      logout: () => set({ token: null, user: null }),
-    }),
-    { name: 'micro-host-auth' },
-  ),
-)
+  return {
+    token: auth.getAccessToken(),
+    user: auth.getUser(),
+    loading: false,
+    login: async () => {
+      set({ loading: true })
+      try {
+        await auth.login({ username: 'mock', password: 'mock' })
+        await auth.getPermissions()
+      } finally {
+        set({ loading: false })
+      }
+    },
+    logout: () => auth.logout(),
+  }
+})

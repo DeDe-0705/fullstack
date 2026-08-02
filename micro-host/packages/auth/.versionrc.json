@@ -1,0 +1,17 @@
+{
+  "path": ".",
+  "tagPrefix": "@king-dede/auth@",
+  "packageFiles": [
+    {
+      "filename": "package.json",
+      "type": "json"
+    }
+  ],
+  "bumpFiles": [
+    {
+      "filename": "package.json",
+      "type": "json"
+    }
+  ],
+  "infile": "CHANGELOG.md"
+}
