@@ -1,6 +1,6 @@
 {
   "name": "@king-dede/auth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "微前端场景下的轻量登录鉴权工具：token 管理 + 跨应用登录态广播",
   "type": "module",
   "main": "./dist/index.cjs",
