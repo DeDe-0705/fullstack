@@ -31,6 +31,17 @@ export const subApps: SubAppConfig[] = [
     description: '临时联调子应用：本地 ui-kit showcase（http://localhost:5173/）',
   },
   {
+    name: 'markdown',
+    title: 'Markdown 渲染',
+    path: '/micro/markdown',
+    url: subAppUrls.markdown,
+    roles: ['admin', 'hrbp', 'manager', 'employee'],
+    preload: false,
+    alive: false,
+    status: 'ready',
+    description: 'Vue 3 子应用：markstream-vue 流式 Markdown 渲染（http://localhost:5174/）',
+  },
+  {
     name: 'hr',
     title: '人事模块',
     path: '/micro/hr',
