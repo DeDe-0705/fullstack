@@ -195,7 +195,9 @@ export class UserModule {}
 
 ## 三、实战：你在理想汽车怎么用的
 
-### 3.1 出入预约后台管理 — NestJS 架构
+### 3.1 学习示例：出入预约业务 × NestJS 架构
+
+> 说明：出入预约真实后端是 Spring Boot + Kafka + MySQL + Eureka；这里用 NestJS 演示同类后台的分层架构，便于理解后端通用设计。
 
 ```
 出入预约后端架构：
@@ -221,7 +223,7 @@ src/
 
 ### 3.2 面试话术
 
-> "在出入预约项目中，我用 NestJS 搭建了后端。核心设计是模块化——auth 模块负责 JWT 签发和鉴权守卫，reservation 模块负责预约单的 CRUD。通过全局 Guard 统一拦截需要鉴权的接口，通过全局 Interceptor 统一包装响应格式 `{code, data, message}`。前后端通过 OpenAPI/Swagger 自动生成 TypeScript 类型定义，前端直接用生成好的 interface 和 API 调用函数，减少了手写类型和接口文档的维护成本。"
+> "出入预约真实后端是 Spring Boot，但它和 NestJS 的分层思想一致：模块化拆分、统一响应、鉴权拦截、Swagger/OpenAPI 生成前端类型。用 NestJS 实现同类后台时，核心设计是模块化——auth 模块负责 JWT 签发和鉴权守卫，reservation 模块负责预约单的 CRUD；全局 Guard 统一拦截需要鉴权的接口，全局 Interceptor 统一包装响应格式 `{code, data, message}`。前后端通过 OpenAPI/Swagger 自动生成 TypeScript 类型定义，前端直接用生成好的 interface 和 API 调用函数，减少手写类型和接口文档的维护成本。"
 
 ---
 

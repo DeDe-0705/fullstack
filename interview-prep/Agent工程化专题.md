@@ -59,11 +59,11 @@ Agent 驱动：Agent 自主规划 + 执行 + 自检 → 人审核
 2. MCP（Model Context Protocol）
    ├── chrome-devtools-mcp  → 页面功能核验
    ├── Playwright MCP       → E2E 自动化测试
-   └── 飞书 MCP             → 拉取需求文档
+   └── lark-cli              → 拉取飞书需求文档
 
 3. Sub-Agent 协同
-   ├── 前端 Agent 生成代码 → 自动唤起测试 Agent 校验
-   └── 后端接口完成 → 自动调用 Agent 同步生成前端接口代码 + TS 类型
+   ├── 前端 Agent → 开发页面 + 按提示词自校验
+   └── 后端 Agent → 实现接口 + 自动同步前端 TS 类型/API 函数
 ```
 
 ---
@@ -103,7 +103,7 @@ MCP Server（服务端）        MCP Client（Agent 端）
 | **filesystem** | 读写文件 | Agent 操作项目代码 |
 | **fetch** | 拉取网页 | 搜索文档、查 API |
 | **github** | 操作 PR、Issue | 代码评审、合并 |
-| **飞书 MCP** | 拉文档、发消息 | 拉取需求文档 |
+| **lark-cli** | 拉取飞书文档 | 拉取需求文档 |
 
 ### 3.4 配置 MCP Server
 
@@ -176,8 +176,8 @@ description: Vue3 组件开发规范 - 用于创建业务组件
 skill: vue3-business-component
   → 约束 Vue3 组件写法（script setup / defineProps / scoped）
 
-skill: nestjs-module-spec
-  → 约束 NestJS 模块写法（Controller/Service/Module 分层）
+skill: backend-api-spec
+  → 约束后端接口写法（RESTful / 统一响应 / 权限注解）
 
 skill: auth-sdk-integration
   → 约束鉴权 SDK 接入规则（拦截器、Token 刷新流程）
@@ -199,9 +199,8 @@ skill: auth-sdk-integration
 
 Sub-Agent 协同：
   主 Agent → 拆任务
-    ├── 前端 Agent → 写 Vue 组件
-    ├── 测试 Agent → 写 Vitest 测试用例
-    └── 后端 Agent → 写 NestJS 接口
+    ├── 前端 Agent → 写 Vue 组件 + 自校验
+    └── 后端 Agent → 写后端接口 + 同步类型
   主 Agent → 整合、审核、修 bug
 ```
 
@@ -210,21 +209,15 @@ Sub-Agent 协同：
 ```
 你的实际配置：
 
-1. 前端代码生成 Agent
-   ├── 输入：需求文档（飞书 MCP 拉取）+ Vue3 Skill
-   ├── 输出：组件代码
-   └── 完成后 → 自动唤起测试 Agent
+1. 前端 Agent
+   ├── 输入：需求文档（lark-cli 拉取）+ 前端 Skill（Vue3/组件库/权限 SDK 用法）
+   ├── 输出：页面组件 + API 调用
+   └── 完成后 → 按提示词自校验（类型定义、错误处理、组件库/权限用法）
 
-2. 测试 Agent
-   ├── 输入：前端 Agent 生成的代码
-   ├── 工具：Vitest + chrome-devtools-mcp
-   ├── 任务：跑单元测试 + 浏览器核验
-   └── 失败 → 反馈给前端 Agent 修
-
-3. 后端接口 Agent
-   ├── 输入：OpenAPI 文档 / Swagger
-   ├── 任务：生成 NestJS Controller/Service/DTO
-   └── 完成后 → 自动调用前端 Agent 同步生成接口代码 + TS 类型
+2. 后端 Agent
+   ├── 输入：需求文档 + 后端 Skill（接口规范、鉴权注解、Kafka/Feign 用法）
+   ├── 任务：实现接口与数据处理
+   └── 完成后 → 自动同步生成前端 TS 类型与 API 函数
 ```
 
 ### 5.3 Sub-Agent 协同的关键设计
@@ -232,7 +225,7 @@ Sub-Agent 协同：
 ```
 ✅ 单一职责：每个 Agent 只做一件事
 ✅ 输入输出契约：用 OpenAPI / TS 类型定义接口
-✅ 失败回滚：测试 Agent 失败 → 触发前端 Agent 修
+✅ 失败回滚：校验/核验失败 → 反馈给对应 Agent 修
 ✅ 主 Agent 审核：最后由主 Agent 整合、修 bug、决策
 ❌ 避免 Agent 互相调用形成环 → 死循环
 ```
@@ -245,13 +238,13 @@ Sub-Agent 协同：
 
 ```
 1. 输入层 — Skill 文件约束
-   ├── 技术栈基线（Vue3 + TS + NestJS）
+   ├── 技术栈基线（Vue3 + TS + 公司组件库 / Spring Boot）
    ├── 代码风格（命名、目录结构）
    └── 禁止事项（不用 any、不用 mixins）
 
 2. 执行层 — Sub-Agent 自检
    ├── 类型检查：tsc --noEmit
-   ├── 单元测试：Vitest
+   ├── 类型检查：tsc --noEmit
    └── Lint：ESLint + Prettier
 
 3. 验证层 — MCP 工具核验
@@ -299,33 +292,30 @@ jobs:
 ### 7.1 你的实际工作流
 
 ```
-1. 拉需求（飞书 MCP）
-   Agent 通过飞书 MCP 拉取需求文档
-   → 解析为结构化任务列表
+1. 拉需求（lark-cli）
+   通过 lark-cli 拉取飞书需求文档
+   → 人工整理业务信息，形成 AI 可执行的任务描述
 
-2. 规划任务（主 Agent）
-   → 拆分为前端任务、后端任务、测试任务
-   → 分配给 Sub-Agent
+2. 规划任务（主 Agent + 人工）
+   → 拆分为前端任务、后端任务
+   → 分配给前后端 Agent
 
-3. 后端先行
-   后端 Agent 用 NestJS Skill 约束 → 生成 Controller/Service/DTO
-   → 完成后自动调 OpenAPI 生成接口文档
+3. 并行开发
+   后端 Agent 用后端 Skill 约束 → 生成接口与数据处理
+   → 完成后自动生成前端 TS 类型 + API 函数
+   前端 Agent 用前端 Skill 约束 → 基于 Mock/类型生成组件代码
 
-4. 前端跟进
-   前端 Agent 读取 OpenAPI → 自动生成 TS 类型 + API 调用函数
-   → 用 Vue3 Skill 约束 → 生成组件代码
+4. 功能核验
+   chrome-devtools-mcp / Playwright MCP 跑页面流程
+   → 失败反馈给对应 Agent 修
 
-5. 测试核验
-   测试 Agent 跑 Vitest + Playwright E2E
-   → 失败反馈给前端 Agent 修
-
-6. 人工审核
-   主 Agent 整合 → 我审核 PR → 合并部署
+5. 人工验收
+   人工验收 → 部署上线 → 投产质量把控
 ```
 
 ### 7.2 面试话术模板
 
-> "在出入预约项目中，我是项目 Owner，采用 AI 驱动的研发模式。基于 Claude Code 搭建研发环境：通过 Skill 文件约束前端 Vue3 和后端 NestJS 的接入规范；通过系统提示词锁定 Spring Boot 基线版本。搭建了 Sub-Agent 协同方案——前端代码生成后自动唤起测试 Agent 用 Vitest + chrome-devtools-mcp 核验；后端接口完成后自动调 Agent 同步生成前端接口代码和 TS 类型。我自己聚焦在环境配置、部署和投产质量把控上，最后做人工审核。结果是出入预约业务流程高效落地，包括预约单管理、状态流转、车辆签到签退完整链路。"
+> "在出入预约项目中，我是项目 Owner，采用 AI 驱动的研发模式。基于 Claude Code 搭建研发环境：通过 Skill 文件约束前端 Vue3、公司组件库、权限 SDK 的接入规则与已封装 SDK 用法，通过系统提示词规范后端 Spring Boot 基线版本。搭建了前后端双 Agent 协同方案——前端 Agent 负责页面开发并自校验，后端 Agent 负责接口开发，接口完成后自动同步生成前端 TS 类型。用 chrome-devtools-mcp 和 Playwright MCP 完成页面功能核验，通过 lark-cli 拉取飞书需求文档。我自己聚焦在信息整理、验收、部署和投产质量把控上。结果是出入预约业务流程高效落地，包括预约单管理、状态流转、车辆入场/出厂完整链路。"
 
 ---
 
