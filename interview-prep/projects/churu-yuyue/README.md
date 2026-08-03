@@ -272,3 +272,9 @@ export const permission = {
 | AI 生成代码有越权/XSS 风险？ | 统一请求层 + 后端鉴权兜底；页面流程用 MCP 跑正常/异常分支 |
 | 员工离职消息怎么处理？ | Kafka 消费离职事件，联动预约负责人相关数据（失效或转交），消费需幂等 |
 | 车牌号等数据从哪来？ | Feign 调公共车辆/人员服务，本服务不重复维护数据 |
+
+---
+
+## 相关文档
+
+- [Java 后端技术栈（面试速查）](./Java后端技术栈.md) — Spring Boot / Maven / MySQL / Kafka / Eureka / Feign / Apollo 定位与追问口径
