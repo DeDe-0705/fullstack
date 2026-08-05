@@ -389,6 +389,37 @@ new Person()  // this = {}
 // ✅ Vue3 Composition API 的 setup() 中没有 this，天然避开这些问题
 ```
 
+### 4.2.1 bind / call / apply 高频追问（手写前先背熟）
+
+**三者核心区别：**
+
+| 方法 | 执行方式 | 参数形式 | 典型用途 |
+|------|---------|---------|---------|
+| call | 立即调用 | 参数列表 `fn.call(ctx, a, b)` | 借用方法、透传参数 |
+| apply | 立即调用 | 数组 `fn.apply(ctx, [a, b])` | 配合 arguments/数组展开 |
+| bind | 返回新函数 | 参数可分次传入（柯里化） | 固定 this + 预置参数 |
+
+**bind 底层原理：** 返回的绑定函数是"异质函数对象"，通过内部槽保存三样东西——`[[BoundThis]]`（固定的 this）、`[[BoundTargetFunction]]`（原函数）、`[[BoundArguments]]`（预置参数）。**这些是内部槽，不是词法环境**，不参与作用域链。面试时说"bind 把 this 存进词法环境"是错的。
+
+**高频追问 1：多次 bind 会怎样？** this 以**第一次 bind** 的对象为准，后续 bind 的 this 被忽略，但**参数会继续拼接**：
+
+```js
+const fn = function (a, b) { return [this.x, a, b] }
+const bound1 = fn.bind({ x: 1 }, 10)
+const bound2 = bound1.bind({ x: 99 }, 20)
+bound2()  // [1, 10, 20] — this 还是 { x: 1 }，参数拼接
+```
+
+**高频追问 2：箭头函数能被 bind 吗？** 能调用、不报错，但传入的 `thisArg` **永远无效**——箭头函数没有自己的 this，用的是定义时捕获的词法 this。所以 bind 箭头函数只剩"预置参数"一个用途。call/apply 同理。
+
+**高频追问 3：bind 的目标必须有 prototype 吗？** 不需要。bind 只要求目标是**可调用对象（callable）**。箭头函数、对象方法简写都没有 `prototype`，照样能 bind。
+
+**高频追问 4：传 null/undefined 给 call/apply/bind？** 非严格模式下 this 被替换为全局对象（window/globalThis）；**严格模式下保持 null/undefined**。
+
+**高频追问 5：new 一个 bind 出来的函数？** `new boundFn()` 等价于 `new targetFn()`：绑定的 this 被忽略（new 会创建新实例作为 this），但**预置参数仍会传入**构造函数。手写 bind 必须处理这一点。
+
+**面试话术：** "bind 通过内部槽保存原函数、this 和预置参数并返回绑定函数；绑定函数的 this 永久固定，再 bind 只拼参数；箭头函数可 bind 但 this 无效；bound 函数可被 new，此时 this 被忽略而参数保留。"
+
 ### 4.3 闭包
 
 ```js
