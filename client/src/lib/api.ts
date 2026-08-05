@@ -1,4 +1,4 @@
-const BASE_URL = '/api'
+export const BASE_URL = '/api'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -6,7 +6,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   })
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`)
+    const error = new Error(
+      `API error: ${res.status} ${res.statusText}`,
+    ) as Error & { status?: number }
+    // 附带状态码，方便调用方区分 404/409/500 等业务语义
+    error.status = res.status
+    throw error
   }
   return res.json()
 }

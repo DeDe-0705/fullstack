@@ -4,6 +4,7 @@ import { Home } from '../pages/Home'
 import { About } from '../pages/About'
 import { Posts } from '../pages/Posts'
 import { PostDetail } from '../pages/PostDetail'
+import { AgentChat } from '../pages/AgentChat'
 import { NotFound } from '../pages/NotFound'
 import { queryClient } from '../lib/queryClient'
 import { postDetailOptions } from '../lib/posts'
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
         element: <PostDetail />,
       },
       { path: 'about', element: <About /> },
+      { path: 'agent', element: <AgentChat /> },
       { path: '*', element: <NotFound /> },
     ],
   },

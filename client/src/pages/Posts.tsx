@@ -1,12 +1,23 @@
-import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Flex,
+  Form,
+  Input,
+  List,
+  Typography,
+} from 'antd'
+import { useNavigate } from 'react-router-dom'
 import { createPost, postListOptions } from '../lib/posts'
 
 export function Posts() {
   const queryClient = useQueryClient()
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
+  const navigate = useNavigate()
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
 
   // useQuery 的常用状态：isPending(首次加载) / isFetching(任何请求中，含后台刷新) / isError
   const { data: posts, isPending, isError, error, isFetching } =
@@ -17,83 +28,78 @@ export function Posts() {
     onSuccess: () => {
       // 写入成功后让列表缓存失效，自动触发重新拉取（面试高频：invalidateQueries）
       queryClient.invalidateQueries({ queryKey: ['posts', 'list'] })
-      setTitle('')
-      setContent('')
+      message.success('发布成功')
+      form.resetFields()
     },
+    onError: (err) => message.error(`发布失败：${err.message}`),
   })
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault()
-    if (!title.trim()) return
-    mutation.mutate({ title, content })
-  }
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">帖子列表</h1>
+    <Flex vertical gap={24}>
+      <Flex justify="space-between" align="center">
+        <Typography.Title level={3} style={{ margin: 0 }}>
+          帖子列表
+        </Typography.Title>
         {/* isFetching：缓存仍可用但后台正在刷新，可给用户一个轻提示 */}
         {isFetching && (
-          <span className="text-xs text-gray-400">后台刷新中...</span>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            后台刷新中...
+          </Typography.Text>
         )}
-      </div>
+      </Flex>
 
       {/* useMutation 示例：新增帖子 */}
-      <form
-        onSubmit={handleSubmit}
-        className="p-4 bg-white rounded-lg border border-gray-200 space-y-3"
-      >
-        <p className="text-sm text-gray-500">useMutation 示例：新增帖子</p>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="标题"
-          className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="内容"
-          rows={3}
-          className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        <button
-          type="submit"
-          disabled={mutation.isPending}
-          className="px-4 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+      <Card title="useMutation 示例：新增帖子">
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(values: { title: string; content?: string }) =>
+            mutation.mutate({ title: values.title, content: values.content ?? '' })
+          }
         >
-          {mutation.isPending ? '提交中...' : '发布'}
-        </button>
-        {mutation.isError && (
-          <p className="text-sm text-red-600">发布失败：{mutation.error.message}</p>
-        )}
-      </form>
+          <Form.Item
+            name="title"
+            label="标题"
+            rules={[{ required: true, message: '请输入标题' }]}
+          >
+            <Input placeholder="标题" />
+          </Form.Item>
+          <Form.Item name="content" label="内容">
+            <Input.TextArea placeholder="内容" rows={3} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={mutation.isPending}>
+            发布
+          </Button>
+        </Form>
+      </Card>
 
-      {/* 列表：isPending / isError / 成功 三态 */}
-      {isPending ? (
-        <p className="text-gray-500">加载中...</p>
-      ) : isError ? (
-        <p className="text-red-600">加载失败：{error.message}</p>
+      {isError ? (
+        <Alert type="error" message={`加载失败：${error.message}`} />
       ) : (
-        <ul className="space-y-3">
-          {posts.map((post) => (
-            <li key={post.id}>
-              <Link
-                to={`/posts/${post.id}`}
-                className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors"
+        <List
+          loading={isPending}
+          dataSource={posts ?? []}
+          renderItem={(post) => (
+            <List.Item>
+              <Card
+                hoverable
+                style={{ width: '100%' }}
+                onClick={() => navigate(`/posts/${post.id}`)}
               >
-                <p className="font-semibold text-gray-900">{post.title}</p>
-                <p className="mt-1 text-sm text-gray-500 line-clamp-2">
+                <Typography.Title level={5} style={{ marginTop: 0 }}>
+                  {post.title}
+                </Typography.Title>
+                <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
                   {post.content}
-                </p>
-                <p className="mt-2 text-xs text-gray-400">
+                </Typography.Paragraph>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {new Date(post.createdAt).toLocaleString()}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
+                </Typography.Text>
+              </Card>
+            </List.Item>
+          )}
+        />
       )}
-    </div>
+    </Flex>
   )
 }

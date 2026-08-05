@@ -1,6 +1,9 @@
-async function asyncPool(limit: number, tasks: any[]) {
-  const results: Promise<any>[] = []
-  const executing = new Set()
+export async function asyncPool<T>(
+  limit: number,
+  tasks: Array<() => Promise<T>>,
+): Promise<T[]> {
+  const results: Promise<T>[] = []
+  const executing = new Set<Promise<T>>()
 
   for (const task of tasks) {
     const p = Promise.resolve().then(() => task())
@@ -15,8 +18,3 @@ async function asyncPool(limit: number, tasks: any[]) {
 
   return Promise.all(results)
 }
-
-const p = Promise.resolve(1)
-console.log(p)
-const res = await p
-console.log(res)

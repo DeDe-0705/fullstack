@@ -1,1 +1,34 @@
 @import "tailwindcss";
+
+/* react-markdown 渲染容器：保证表格/代码块在窄气泡里不撑破布局 */
+.chat-markdown {
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f8fa;
+}
+
+.chat-markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid #e5e7eb;
+  padding: 4px 10px;
+}
