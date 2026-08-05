@@ -264,6 +264,43 @@ obj.fn()   // undefined（外层是全局/undefined）
 obj.fn2()  // 'Alice'
 ```
 
+### 3.2.1 高频追问：对象方法里箭头函数的 this 为什么不是对象？
+
+**核心原因：对象字面量 `{}` 不构成词法环境（作用域）**，只是属性集合。箭头函数捕获的是"定义位置外层作用域链上的 this"，对象不在作用域链上，所以捕获到的是**全局/模块作用域的 this**：
+
+```js
+const arrowObj = {
+  name: 'arrowObj',
+  callName: () => {
+    console.log(this?.name)  // undefined
+  },
+}
+arrowObj.callName()
+```
+
+全局 this 的值取决于运行环境（面试说清环境才算完整）：
+
+| 环境 | 全局顶层 this |
+|------|--------------|
+| 浏览器普通 `<script>`（非严格） | `window`（`window.name` 通常为空） |
+| ES Module / Vite / 严格模式 | `undefined` |
+| Node.js CommonJS | `module.exports`（空对象） |
+
+**对比：** 箭头函数定义在普通函数内时，捕获的是该函数**调用时**的 this：
+
+```js
+const obj = {
+  name: 'obj',
+  outer() {
+    const inner = () => console.log(this.name)
+    inner()
+  },
+}
+obj.outer()  // 'obj' — inner 捕获 outer 的 this
+```
+
+**面试话术：** "箭头函数的 this 沿作用域链向上找最近的非箭头函数作用域或全局，对象字面量不在作用域链上，所以永远无法提供 this；想让方法 this 指向对象，必须用普通函数/方法简写。"
+
 ### 3.3 解构、展开、剩余
 
 ```js
