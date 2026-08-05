@@ -6,6 +6,7 @@
 
 ## 一、基础理论
 
+- [HTML/CSS/ES6/JS 基础](./HTML-CSS-ES6-JS基础.md) — 语义化、盒模型/BFC、垂直居中、let/const/var、闭包、this、事件循环
 - [浏览器原理](./浏览器原理.md) — 渲染流程、回流重绘、Event Loop、GC、进程线程
 - [网络与HTTP](./网络与HTTP.md) — HTTP版本对比、HTTPS/TLS、缓存策略、CORS、安全
 - [浏览器存储与缓存](./浏览器存储与缓存.md) — Cookie/localStorage/sessionStorage/IndexedDB、缓存层级、选型
@@ -25,6 +26,8 @@
 
 ## 四、进阶专题
 
+- [Node.js与NestJS](./Node.js与NestJS.md) — Node 事件循环/模块系统/Stream + NestJS 基础架构、依赖注入、横切关注点、项目实战话术
+- [NestJS面试考点大全](./NestJS面试考点大全.md) — 2026 大厂版：DI 原理/AOP 生命周期/ORM 选型/JWT 鉴权/微服务 gRPC/性能高并发/场景题全覆盖
 - [微前端专题](./微前端专题.md) — 概念与价值、qiankun/无界/Micro-app/Module Federation对比、无界实战、通信/鉴权/路由方案
 - [算法基础](./算法基础.md) — 排序(快排/归并)、树遍历、链表操作、动态规划入门、经典场景题
 - [手写代码](./手写代码.md) — 防抖节流、深拷贝、Promise.all/并发控制、LRU、bind/call/apply、虚拟列表、柯里化、继承

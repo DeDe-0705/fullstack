@@ -40,6 +40,18 @@
 - `src`（source）：**替换当前元素**。`<script src>`、`<img src>`、`<iframe src>`。浏览器暂停解析，等资源加载。
 - `href`（hyper reference）：**建立关联**。`<link href>`、`<a href>`。浏览器不暂停解析，并行加载。
 
+### 1.5 `<!DOCTYPE html>` 与两种渲染模式
+
+**作用：** 告诉浏览器用**标准模式（standards mode）**渲染页面。HTML5 下写法唯一、固定，没有版本号。
+
+**缺失或写错 → 怪异模式（quirks mode）**，模拟 IE5 时代的行为。核心区别：
+
+1. **盒模型（最常考）**：怪异模式下 `width` 包含 `padding` 和 `border`，等价于所有元素默认 `box-sizing: border-box`；标准模式默认 `content-box`，`width` 只算内容区。
+2. **行高与行内元素**：怪异模式下 `line-height` 继承、行内元素垂直布局不同（如图片底部间隙）。
+3. **表格与百分比布局**：单元格尺寸、百分比宽度计算方式有差异。
+
+**面试话术：** "`<!DOCTYPE html>` 决定浏览器用哪套渲染规则，写错或不写，盒模型就先错一半。"
+
 ---
 
 ## 二、CSS
@@ -115,6 +127,20 @@ BFC 解决什么问题：
   height: 100px;
 }
 ```
+
+**各方案适用场景与坑（面试追问重点）：**
+
+| 方案 | 适用场景 | 坑 |
+|------|---------|-----|
+| flex | 通用首选 | 影响父容器子项布局；`justify-content` vs `align-items` 别记反 |
+| grid | 二维布局顺带居中 | `place-items` 对齐"项目在网格区域内"；`place-content` 对齐网格轨道本身，别混 |
+| absolute + transform | 子元素宽高未知 | `top/left: 50%` + `translate(-50%,-50%)`；`transform` 会创建层叠上下文 |
+| absolute + margin | 子元素宽高确定 | 四边 0 是拉伸 + `margin: auto` 居中，**与 transform 无关**，两套不能混用 |
+| 固定宽 + `margin: 0 auto` | 仅水平居中 | 垂直方向普通文档流无剩余空间可分，`margin: auto` 无效 |
+| table-cell + vertical-align | 兼容旧浏览器 | table-cell 不响应 margin，需 `display: table` 包裹 |
+| line-height = height | 单行文本 | 换行/多行立即失效 |
+
+**padding 不是通用居中方案：** 只在父容器和子元素尺寸都固定且不变时手动算间距，一变即失效，别当面试方案说。
 
 ### 2.4 `flex: 1` 是什么的简写？
 
@@ -195,8 +221,28 @@ function fn() {
 // 经典 for 循环差异
 for (var i = 0; i < 3; i++) { setTimeout(() => console.log(i), 0) }  // 3,3,3
 for (let i = 0; i < 3; i++) { setTimeout(() => console.log(i), 0) }  // 0,1,2
-// let 每次迭代创建新的块级作用域，保留当前 i 的值
+// for (let i) 每轮迭代创建新的词法环境 + 新的 i 绑定（继承上一轮值并 i++），
+// 回调闭包捕获的是各自迭代的绑定；var 则是同一个变量、所有回调共享引用
 ```
+
+**var 保留时的经典修复（面试手撕）：**
+
+```js
+// IIFE：每轮立即调用，形参 j 是本次调用作用域内的独立绑定
+for (var i = 0; i < 3; i++) {
+  (function (j) {
+    setTimeout(() => console.log(j), 0)
+  })(i)
+}
+
+// bind：调用 bind 那一刻把 i 的值"快照"进新函数的参数列表
+for (var i = 0; i < 3; i++) {
+  setTimeout(function (j) { console.log(j) }.bind(null, i), 0)
+}
+// ⚠️ bind 在这里的核心是"预置参数"，null 只是占位 this，回调里根本不用 this
+```
+
+**防面试官挖坑：** 不要答"var 保留就改成 async/await 串行"。for 循环**永远不会自动等待异步**（除非循环体内显式 await Promise）；原题结构加 async/await 输出仍是 3 个 3。await 串行只是改变执行时序，没有修复闭包捕获。
 
 ### 3.2 箭头函数 vs 普通函数
 
@@ -361,6 +407,12 @@ c.increment()  // 2
 ```
 
 **面试话术：** "闭包就是一个函数记住并访问了它的词法作用域，即使这个函数在外部被调用了。常见应用：模块模式、柯里化、防抖节流的 timer 变量。"
+
+**高频追问 1：闭包保存的是什么？** 是**词法作用域里的状态变量**（防抖的 timer、节流的上次执行时间、计数器的 count），不是"上下文"——JS 里"上下文"专指 this/执行上下文，说错会被扣分。
+
+**高频追问 2：为什么用闭包而不是全局变量？** 全局变量会让多个实例（如两个输入框）**共享同一份 timer 互相干扰**，且任何代码都能修改；闭包把状态锁在函数私有作用域，每次调用工厂函数生成独立状态。
+
+**高频追问 3：防抖/节流里 this 怎么传？** `setTimeout` 普通函数回调非严格模式 this 指向 window、严格模式 undefined。修复：回调用箭头函数捕获词法 this，或提前 `const self = this`；实现时用 `fn.apply(this, args)` 把 this 和参数透传给原函数。完整实现见 `手写代码.md`。
 
 ### 4.4 深拷贝 vs 浅拷贝
 

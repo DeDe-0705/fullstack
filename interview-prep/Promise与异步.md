@@ -14,6 +14,32 @@ pending --resolve()--> fulfilled --> .then() 回调入微任务队列
 - .then/.catch 的回调才是异步（微任务）
 - 状态一旦变更不可逆
 
+### 事件循环：宏任务与微任务的消费顺序（面试必考）
+
+```
+执行一个宏任务（当前 script / setTimeout 回调 / 事件回调）
+  → 清空微任务队列（每个微任务执行中产生的微任务继续入队尾，直到空）
+  → 渲染机会（浏览器按需渲染，不一定每轮都有）
+  → 取下一个宏任务
+```
+
+**经典输出题：**
+
+```js
+console.log('script start');
+setTimeout(() => console.log('setTimeout'), 0);
+Promise.resolve().then(() => console.log('promise1'))
+  .then(() => console.log('promise2'));
+console.log('script end');
+// script start → script end → promise1 → promise2 → setTimeout
+```
+
+要点：
+- 微任务队列在**当前宏任务结束后一次性清空**，promise1 执行时新产生的 promise2 继续入队，中间**不会插入宏任务**。
+- `setTimeout(fn, 0)` 不是 0ms：最早也是**下一个宏任务**（当前宏任务 + 微任务清空后）。
+- 浏览器最小延迟钳制（clamping）：**嵌套第 5 层及以上**的定时器最小 4ms；**后台标签页**最小 1000ms。
+- 定时器**从调用 setTimeout 那一刻开始计时**，到点后回调只是**入队**，不是立即执行。
+
 ### 链式调用
 
 ```js
@@ -103,6 +129,25 @@ console.log(res)       // 1                        ← await 拆出里面的值
 | Promise.allSettled(ps) | 等全部结束，不论成败 |
 | Promise.race(ps) | 第一个 settled 的作为结果 |
 | Promise.any(ps) | 第一个 fulfilled 的作为结果，全失败才 reject（AggregateError） |
+
+### Promise.all 失败行为细节（追问高频）
+
+- 任一失败 → **立即 reject，不等最慢的**；以第一个失败原因为准。
+- 其他请求**不会被取消**（`fetch` 默认不可取消，要取消必须 `AbortController`），只是结果被丢弃。
+- 入参是可迭代对象，传空数组立即 resolve 空数组。
+
+**"一个失败也要渲染成功部分"的反射模式（不用 allSettled 的思路）：**
+
+```js
+const results = await Promise.all([
+  fetchUser().catch(() => ({ ok: false })),
+  fetchOrders().catch(() => ({ ok: false })),
+  fetchConfig().catch(() => ({ ok: false })),
+])
+// 每个请求被改造成"绝不 reject"，Promise.all 不会提前失败；按 ok 标记渲染
+```
+
+`allSettled` 细节：永远等全部结束、不 reject；每项 `{ status: 'fulfilled', value }` 或 `{ status: 'rejected', reason }`；结果顺序与入参一致。
 
 ### race vs any 实战场景
 
@@ -203,6 +248,13 @@ Promise._all = function(promises) {
 ## 四、async / await
 
 **本质：** Generator + Promise 自动执行器的语法糖。await 相当于 yield。
+
+**精确语义（术语容易被追问）：**
+
+- **async 函数体同步执行到第一个 await**：`async1()` 被调用时，第一个 `console.log` 立即执行；调用 `await async2()` 时，`async2()` 的函数体也是同步执行的。
+- `await` 不是"把后面的函数用 Promise 包装"：它先**同步求值**后面的表达式拿到结果；只有结果不是 Promise 时，才用 `Promise.resolve()` 包装成 Promise。
+- `await 普通值` 的后续代码**照样是微任务**，不会同步继续执行。"普通函数同步、fetch 等待"的二分法是错的。
+- 执行到 `await` 时，当前 async 函数**立即返回让出执行权**，后续代码等价于 `.then` 回调注册为微任务；等被 await 的 Promise resolve、当前宏任务结束时恢复。
 
 ```js
 async function fetchData() {
