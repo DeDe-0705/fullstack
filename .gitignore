@@ -4,5 +4,6 @@ node_modules/
 dist/
 coverage/
 *.log
+.env
 .DS_Store
 王德师简历

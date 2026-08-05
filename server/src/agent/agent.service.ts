@@ -1,0 +1,301 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConversationService } from '../conversation/conversation.service';
+import { ToolsService } from '../tools/tools.service';
+import {
+  DeepSeekChatMessage,
+  DeepSeekService,
+  DeepSeekTool,
+  DeepSeekToolCall,
+  DeepSeekUsage,
+} from './deepseek.service';
+
+export interface AgentChatInput {
+  userId: string;
+  conversationId?: string;
+  message: string;
+}
+
+export interface AgentToolTrace {
+  name: string;
+  arguments: string;
+  result: string;
+}
+
+export interface AgentDonePayload {
+  conversationId: string;
+  toolCalls: AgentToolTrace[];
+  /** 整轮（可能含多轮工具调用）聚合后的 token 用量 */
+  usage: DeepSeekUsage | null;
+  /** 思考耗时：首次 reasoning 增量到首次 content 增量的毫秒数 */
+  thinkingMs: number | null;
+  assistantMessage: {
+    id: string;
+    conversationId: string;
+    role: 'assistant';
+    content: string;
+    reasoning: string | null;
+    createdAt: Date;
+  };
+}
+
+export type AgentStreamEvent =
+  | { kind: 'ready'; conversationId: string }
+  | { kind: 'reasoning'; delta: string }
+  | { kind: 'content'; delta: string }
+  | { kind: 'tool'; name: string; arguments: string; result: string }
+  | ({ kind: 'usage' } & DeepSeekUsage)
+  | ({ kind: 'done' } & AgentDonePayload);
+
+const SYSTEM_PROMPT =
+  '你是出入预约系统的 AI 助手。你可以调用 get_user_info 工具查询用户信息。' +
+  '回答保持简洁，使用中文；需要数据时先调用工具，再基于工具结果回答。';
+
+@Injectable()
+export class AgentService {
+  constructor(
+    private readonly conversationService: ConversationService,
+    private readonly toolsService: ToolsService,
+    private readonly deepSeekService: DeepSeekService,
+  ) {}
+
+  async chat(input: AgentChatInput) {
+    const ctx = await this.prepareChat(input);
+    const { conversationId, messages, toolDefinitions } = ctx;
+
+    const traces: AgentToolTrace[] = [];
+    let reply = '';
+    let reasoning = '';
+    let usage: DeepSeekUsage | null = null;
+
+    // 工具调用循环：模型可能连续调用多个工具，最多 5 轮防止死循环
+    for (let round = 0; round < 5; round += 1) {
+      const result = await this.deepSeekService.chat(messages, toolDefinitions);
+      usage = this.mergeUsage(usage, result.usage);
+      if (result.toolCalls.length === 0) {
+        reply = result.content;
+        reasoning = result.reasoning;
+        break;
+      }
+
+      // assistant 的 tool_calls 必须原样回传，DeepSeek 才能对上工具结果
+      messages.push({ role: 'assistant', content: null, tool_calls: result.toolCalls });
+      for (const call of result.toolCalls) {
+        const args = this.parseToolArguments(call.function.arguments);
+        const toolResult = await this.toolsService.execute(call.function.name, args);
+        traces.push({
+          name: call.function.name,
+          arguments: call.function.arguments,
+          result: toolResult,
+        });
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: toolResult,
+        });
+      }
+    }
+
+    if (!reply) reply = '（工具调用轮次已达上限，未得到最终回复）';
+    await this.conversationService.addMessage(conversationId, 'assistant', reply, reasoning);
+
+    return { reply, conversationId, toolCalls: traces, usage };
+  }
+
+  // 流式对话：边生成边把 reasoning/content/工具轨迹透传给前端，结束后落库
+  async *chatStream(
+    input: AgentChatInput,
+    signal?: AbortSignal,
+  ): AsyncGenerator<AgentStreamEvent> {
+    const ctx = await this.prepareChat(input);
+    const { conversationId, messages, toolDefinitions } = ctx;
+
+    const traces: AgentToolTrace[] = [];
+    let reply = '';
+    let reasoning = '';
+    let usage: DeepSeekUsage | null = null;
+    let persisted = false;
+    let thinkingStartedAt: number | null = null;
+    let contentStartedAt: number | null = null;
+
+    // 先告知前端会话 ID：首次提问会自动建会话，前端停止生成时也能按 ID 刷新历史
+    yield { kind: 'ready', conversationId };
+
+    try {
+      for (let round = 0; round < 5; round += 1) {
+        let toolCalls: DeepSeekToolCall[] = [];
+        for await (const event of this.deepSeekService.streamChat(
+          messages,
+          toolDefinitions,
+          signal,
+        )) {
+          if (event.kind === 'usage') {
+            usage = this.mergeUsage(usage, event);
+            yield event;
+          } else if (event.kind === 'reasoning') {
+            thinkingStartedAt ??= Date.now();
+            reasoning += event.delta;
+            yield { kind: 'reasoning', delta: event.delta };
+          } else if (event.kind === 'content') {
+            contentStartedAt ??= Date.now();
+            // 每轮增量都转发并累积；最终落库的是整个回合的完整文本
+            reply += event.delta;
+            yield { kind: 'content', delta: event.delta };
+          } else {
+            toolCalls = event.toolCalls;
+          }
+        }
+
+        if (toolCalls.length === 0) break;
+
+        messages.push({
+          role: 'assistant',
+          content: reply || null,
+          tool_calls: toolCalls,
+        });
+        for (const call of toolCalls) {
+          const args = this.parseToolArguments(call.function.arguments);
+          const toolResult = await this.toolsService.execute(call.function.name, args);
+          traces.push({
+            name: call.function.name,
+            arguments: call.function.arguments,
+            result: toolResult,
+          });
+          yield {
+            kind: 'tool',
+            name: call.function.name,
+            arguments: call.function.arguments,
+            result: toolResult,
+          };
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: toolResult,
+          });
+        }
+      }
+
+      if (!reply) reply = '（工具调用轮次已达上限，未得到最终回复）';
+      const saved = await this.conversationService.addMessage(
+        conversationId,
+        'assistant',
+        reply,
+        reasoning,
+      );
+      persisted = true;
+      const thinkingMs =
+        thinkingStartedAt && contentStartedAt
+          ? contentStartedAt - thinkingStartedAt
+          : null;
+      yield {
+        kind: 'done',
+        conversationId,
+        toolCalls: traces,
+        usage,
+        thinkingMs,
+        assistantMessage: {
+          id: saved.id,
+          conversationId: saved.conversationId,
+          role: 'assistant',
+          content: saved.content,
+          reasoning: saved.reasoning,
+          createdAt: saved.createdAt,
+        },
+      };
+    } finally {
+      // 客户端中途断开/出错时也把已生成内容落库，避免对话上下文丢失
+      if (!persisted && reply.trim()) {
+        await this.conversationService.addMessage(
+          conversationId,
+          'assistant',
+          reply,
+          reasoning,
+        );
+      }
+    }
+  }
+
+  private async prepareChat(input: AgentChatInput) {
+    if (!input.message?.trim()) throw new BadRequestException('message 必填');
+    const user = await this.conversationService.findUserById(input.userId);
+    if (!user) throw new NotFoundException('用户不存在');
+
+    let conversationId = input.conversationId;
+    if (!conversationId) {
+      // 没指定会话就新建一个，标题取消息前 20 字，前端列表好辨认
+      const created = await this.conversationService.createConversation(
+        input.userId,
+        input.message.slice(0, 20),
+      );
+      conversationId = created.id;
+    }
+
+    await this.conversationService.addMessage(conversationId, 'user', input.message);
+
+    const { items: history } = await this.conversationService.getHistory(
+      conversationId,
+      20,
+      0,
+    );
+    const messages: DeepSeekChatMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      // 历史只持久化 user/assistant，tool/system 不会出现在这里
+      ...history
+        .filter((item) => item.role === 'user' || item.role === 'assistant')
+        .map((item) => ({
+          role: item.role as 'user' | 'assistant',
+          content: item.content,
+        })),
+    ];
+
+    const toolDefinitions: DeepSeekTool[] = this.toolsService.list().map((tool) => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: this.toolsService.toJsonSchema(tool),
+      },
+    }));
+
+    return { conversationId, messages, toolDefinitions };
+  }
+
+  private parseToolArguments(raw: string): Record<string, unknown> {
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // 模型偶发返回非法 JSON 时降级为空对象，保证工具执行不中断
+      return {};
+    }
+  }
+
+  // 工具循环可能多次请求模型，用量按字段累加，方便整体展示/统计
+  private mergeUsage(
+    target: DeepSeekUsage | null,
+    next: DeepSeekUsage | null,
+  ): DeepSeekUsage | null {
+    if (!next) return target;
+    return {
+      completion_tokens: (target?.completion_tokens ?? 0) + next.completion_tokens,
+      prompt_tokens: (target?.prompt_tokens ?? 0) + next.prompt_tokens,
+      prompt_cache_hit_tokens:
+        (target?.prompt_cache_hit_tokens ?? 0) + (next.prompt_cache_hit_tokens ?? 0),
+      prompt_cache_miss_tokens:
+        (target?.prompt_cache_miss_tokens ?? 0) + (next.prompt_cache_miss_tokens ?? 0),
+      total_tokens: (target?.total_tokens ?? 0) + next.total_tokens,
+      prompt_tokens_details: {
+        cached_tokens:
+          (target?.prompt_tokens_details?.cached_tokens ?? 0) +
+          (next.prompt_tokens_details?.cached_tokens ?? 0),
+      },
+      completion_tokens_details: {
+        reasoning_tokens:
+          (target?.completion_tokens_details?.reasoning_tokens ?? 0) +
+          (next.completion_tokens_details?.reasoning_tokens ?? 0),
+      },
+    };
+  }
+}
