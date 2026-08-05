@@ -457,6 +457,28 @@ bound2()  // [1, 10, 20] — this 还是 { x: 1 }，参数拼接
 
 **面试话术：** "bind 通过内部槽保存原函数、this 和预置参数并返回绑定函数；绑定函数的 this 永久固定，再 bind 只拼参数；箭头函数可 bind 但 this 无效；bound 函数可被 new，此时 this 被忽略而参数保留。"
 
+### 4.2.2 new 机制（this 优先级最高）
+
+**四步机制：** 创建空对象 → 原型链接到 `Constructor.prototype` → 执行构造函数并把 this 绑定到新对象 → 构造函数返回对象/函数则用它，否则返回新对象。
+
+```js
+function Foo() {
+  this.name = 'foo'
+  return { name: '覆盖了' }   // 返回对象 → new Foo().name === '覆盖了'
+}
+function Bar() {
+  this.name = 'bar'
+  return 42                   // 返回基本类型 → 被忽略，new Bar().name === 'bar'
+}
+```
+
+**高频追问：**
+
+1. **`new.target`**：new 调用时指向构造函数本身，普通调用为 `undefined`；可用来兼容"忘写 new"的场景。
+2. **优先级**：new > 显式（call/apply/bind）> 隐式（obj.fn()）> 默认。所以 `new boundFn()` 时 bind 的 this 被忽略。
+3. **不能 new 的函数**：箭头函数（无 `[[Construct]]` 内部方法）、对象方法简写；class 相反——**只能** new 调用。
+4. 手写实现见 `手写代码.md` 第八章。
+
 ### 4.3 闭包
 
 ```js
