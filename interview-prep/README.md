@@ -15,7 +15,7 @@
 
 ## 二、框架原理
 
-- [Vue3 深度原理](./Vue3深度原理.md) — 响应式系统(Proxy)、虚拟DOM diff、Compiler优化、Composition API、调度机制
+- [Vue3 深度原理](./Vue3深度原理.md) — 响应式系统(Proxy)、虚拟DOM diff、Compiler优化、Composition API、生命周期、组件通信、内置组件原理、Vue 3.5/3.6 新特性
 - [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、并发模式、Virtual DOM reconciliation、与Vue对比
 
 ## 三、工程与性能
@@ -47,6 +47,7 @@
 - [HTTP 缓存决策流程](./http-cache-demo.html) — 强缓存/协商缓存判断链路
 - [浏览器存储对比](./storage-demo.html) — 直接操作 Cookie/localStorage/sessionStorage/IndexedDB
 - [浏览器渲染流程](./render-demo.html) — 6阶段渲染管线交互图
+- [Vue3 响应式可视化](./vue3-reactivity-demo.html) — Proxy 拦截、依赖收集/触发全过程
 
 ---
 

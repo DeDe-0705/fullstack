@@ -1,6 +1,8 @@
 # Vue3 深度原理
 
 > 高级前端面试中，Vue3 原理是必考题。面试官不会满足于"我用过 Vue3"，他们会追问响应式怎么实现、diff 怎么优化、compiler 做了什么。
+>
+> 更新于 2026-08-06：补齐生命周期、组件通信、内置组件原理、Vue 3.5/3.6 新特性、SSR 水合等 2025–2026 大厂面试高频考点（来源见文末）。
 
 ---
 
@@ -90,9 +92,11 @@ class RefImpl {
 | 解构 | 不会丢失响应式 | 会丢失响应式（需 toRefs） |
 | 重新赋值 | 不会丢失响应式 | 会丢失响应式 |
 | template 中 | 自动解包 .value | 直接使用 |
-| watch 监听 | 需加 .value 或用 getter | 直接监听 |
+| watch 监听 | 可直接传 ref（自动解包） | 直接监听（默认 deep） |
 
 **关键结论：** 能用 ref 就别用 reactive。ref 重新赋值不丢响应式，解构不丢，心智负担更小。reactive 主要用于表单对象、配置对象等不需要重新赋值的场景。
+
+**真实源码补充：** 上面的 Proxy 实现是简化版。Vue 内部用 `reactiveMap: WeakMap` 缓存 `target → proxy`，同一个原始对象只会被代理一次；get 返回嵌套对象时通过 `toReactive` 复用已有代理，而不是每次新建。所以 `reactive(obj) === reactive(obj)` 恒成立。
 
 ### 1.4 依赖收集 (track) 与触发更新 (trigger)
 
@@ -155,7 +159,50 @@ watchEffect(effect):
   - 自动追踪依赖
   - 立即执行一次
   - 不提供 oldVal
-  - 无法控制执行时机
+  - 支持 flush: 'pre' | 'post' | 'sync'（默认 pre）
+```
+
+**注意：** watchEffect 同样支持 `flush` 选项（默认 `pre`），并不是"无法控制执行时机"；它只是不像 watch 那样需要显式声明依赖源。Vue 3.5 起还提供全局 `onWatcherCleanup()` 在 watch 回调内注册清理函数（见第七章）。
+
+### 1.7 响应式进阶与边界（面试深挖区）
+
+**浅层响应式：** `shallowRef` / `shallowReactive` 只代理第一层，适合"整体替换、内部不变"的大对象；`triggerRef(shallowRef)` 可强制触发依赖。
+
+**跳过代理：** `markRaw` 标记对象永不被代理（第三方库实例、图标对象），避免无意义的劫持开销；`readonly` / `shallowReadonly` 做只读包装，组件的 props 本质就是 shallowReadonly。
+
+**链接引用：** `toRef(obj, key)` / `toRefs(obj)` 把对象属性变成独立 ref 并保持与原对象的连接（解决解构丢失响应式）；`unref` / `isRef` / `toValue`（3.3+）用于 composable 参数归一化——reactive props 解构后的变量传入 composable 时，用 `toValue()` 同时兼容 ref / getter / 普通值。
+
+**自定义响应式：** `customRef` 可自定义 get/set 中的 track/trigger，典型场景是防抖输入框。
+
+**reactive 的两个经典坑：**
+
+```js
+// 坑 1：整体替换会丢响应式
+state = newObj          // ❌ 变量指向新对象，原代理失效
+Object.assign(state, newObj) // ✅ 原地合并，保留代理
+
+// 坑 2：解构会丢响应式
+const { count } = state // ❌ count 是普通值
+const { count } = toRefs(state) // ✅ 保持响应式
+```
+
+**ref 在 reactive 中的自动解包：**
+
+```js
+const state = reactive({ count: ref(1) })
+state.count // 1，ref 被自动解包
+
+// 但数组和 Map/Set 容器里的 ref 不会解包
+const arr = reactive([ref(1)])
+arr[0] // RefImpl 对象，不是 1
+```
+
+**集合类型：** reactive 代理 Map/Set/WeakMap/WeakSet 时会拦截 `get/set/has/add/delete/forEach/迭代器` 等内部方法（源码中叫 instrumentations），所以 `map.size`、`map.get()` 也能被 track 和 trigger。
+
+**watch 深度监听的代价：** `watch(obj, cb, { deep: true })` 会递归 `traverse()` 收集整棵对象的所有属性；大对象上应优先改成 getter 精确监听：
+
+```js
+watch(() => obj.list.length, cb) // 只依赖 length，比 deep 便宜得多
 ```
 
 ---
@@ -204,7 +251,7 @@ CLASS = 2,          // 动态 class
 STYLE = 4,          // 动态 style
 PROPS = 8,          // 动态属性（不含 class/style）
 FULL_PROPS = 16,    // 含动态 key 的属性
-HYDRATE_EVENTS = 32,// 事件监听
+NEED_HYDRATION = 32, // 需要水合（SSR）
 STABLE_FRAGMENT = 64,// 子节点顺序稳定
 KEYED_FRAGMENT = 128,// 带 key 的子节点
 UNKEYED_FRAGMENT = 256,// 不带 key 的子节点
@@ -227,21 +274,37 @@ Block 是一组 vnode 的动态节点的扁平化数组。
 3. diff 只对比 block 中的节点
 ```
 
-### 2.4 双端 Diff 到快速 Diff
+### 2.4 Vue2 双端 Diff vs Vue3 快速 Diff
 
-Vue2 使用双端对比法（首首、尾尾、首尾、尾首），Vue3 进一步优化：
+**先纠正一个常见口误：** Vue3 并没有沿用双端 Diff，它使用的是"头尾同步 + 最长递增子序列"的快速 Diff（fast diff）。
+
+- Vue2：双端对比法，首首、尾尾、首尾、尾首四个方向移动指针；遇到乱序仍需遍历查找 key 并移动，最坏情况下操作较多
+- Vue3：先头尾同步，再处理剩余节点
 
 ```
-Vue3 Diff 策略：
-1. 从头部开始同步（相同的 key 和类型）
+Vue3 快速 Diff 策略：
+1. 从头部开始同步（相同 key 和类型直接 patch）
 2. 从尾部开始同步
 3. 处理剩余节点：
    - 仅新增：挂载
    - 仅删除：卸载
-   - 乱序：用最长递增子序列算法最小化移动
+   - 乱序：建立 keyToNewIndexMap + 最长递增子序列（LIS）最小化移动
 ```
 
 **最长递增子序列 (LIS) 的应用：** 找出无需移动的节点，其余节点按需移动/创建/删除，将 DOM 操作降到最少。
+
+### 2.5 key 的作用与 v-for 注意事项
+
+- key 是 diff 判断"是否是同一个节点"的唯一依据：同 key 同类型 → 原地 patch；key 变化 → 卸载重建
+- 不要用 index 当 key：数组头部插入/删除时 index 全部错位，Vue 会复用错误的 DOM，导致输入框内容、组件状态错乱；优先用业务唯一 id
+- Vue3 中 `v-if` 的优先级高于 `v-for`（Vue2 相反），但同一元素上同时使用两者仍是反模式，应拆到 `<template>` 里
+- v-for 编译为 `KEYED_FRAGMENT (128)`，子节点走 keyed diff 路径
+
+### 2.6 v-once / v-memo
+
+- `v-once`：只渲染一次，后续数据变化不再更新（编译期把子树标记为已缓存 vnode）
+- `v-memo="[deps]"`（3.2+）：依赖数组不变时复用整棵子树，适合 v-for 中的昂贵列表项；依赖变化才重新渲染
+- 二者都是用"确定性"换性能，滥用会引入一致性 bug，只用于明确的静态/大列表场景
 
 ---
 
@@ -299,6 +362,57 @@ onClick: () => ctx.foo()
 onClick: _cache[0] || (_cache[0] = ($event) => ctx.foo())
 ```
 
+### 3.5 v-model 的编译原理（高频）
+
+原生元素 `v-model="msg"` 由编译器按元素类型展开：
+
+```js
+// input[type=text]
+//   → :value="msg" @input="msg = $event.target.value"
+// checkbox / radio
+//   → :checked="msg" @change="msg = $event.target.checked"
+// select
+//   → :value="msg" @change="msg = $event.target.value"
+```
+
+组件上的 v-model 是语法糖，编译结果非常固定：
+
+```js
+// 模板：<Child v-model="foo" v-model:title="bar" />
+
+// 编译后：
+//   <Child
+//     :modelValue="foo"
+//     @update:modelValue="foo = $event"
+//     :title="bar"
+//     @update:title="bar = $event"
+//   />
+```
+
+组件内部对应：
+
+```js
+defineProps(['modelValue', 'title'])
+defineEmits(['update:modelValue', 'update:title'])
+```
+
+Vue 3.4+ 推荐用 `defineModel()` 简化：
+
+```js
+const model = defineModel()        // modelValue + update:modelValue
+const title = defineModel('title') // 命名参数
+model.value = 'x'                  // 自动 emit update:modelValue
+```
+
+**面试话术：** v-model 本质是 `modelValue` prop + `update:modelValue` 事件；`defineModel` 只是把这对声明封装成可读写的 ref，编译后仍然是同样的 prop/emit。
+
+### 3.6 插槽的编译原理
+
+- 普通插槽：子组件 children 编译成 `{ default: () => vnode }` 形式的对象，父组件更新时决定插槽内容是否重新渲染
+- 作用域插槽：`<slot :item="item">` 编译成函数 `({ item }) => vnode`，子组件通过 `$slots.default({ item })` 调用，把数据作为参数传给父级插槽模板
+- 动态插槽会打 `DYNAMIC_SLOTS (1024)` 标记：父组件更新时必须强制重新渲染插槽内容
+- **面试常问：为什么作用域插槽能拿到子组件数据？** 因为编译后是"父模板作为函数、子组件负责调用"，数据由函数参数传入，本质是 render 函数组合
+
 ---
 
 ## 四、Composition API 核心设计
@@ -349,6 +463,53 @@ const { x, y } = useMouse()
 | Tree Shaking | 不支持 | 支持（未用到的 API 可被摇掉） |
 | 学习曲线 | 低（直观的选项分组） | 中（需要理解响应式原理） |
 
+### 4.4 Vue3 生命周期（必背表）
+
+| Composition API | Options API | 触发时机 |
+|---|---|---|
+| setup() | beforeCreate / created | 组件实例创建阶段（setup 统一替代两者） |
+| onBeforeMount | beforeMount | 挂载前 |
+| onMounted | mounted | 挂载后，DOM 可访问 |
+| onBeforeUpdate | beforeUpdate | 响应式数据变化后、重新渲染前 |
+| onUpdated | updated | 重新渲染后 |
+| onBeforeUnmount | beforeUnmount | 卸载前（清理定时器/事件监听） |
+| onUnmounted | unmounted | 卸载后 |
+| onActivated / onDeactivated | activated / deactivated | 被 keep-alive 缓存组件激活 / 失活 |
+| onErrorCaptured | errorCaptured | 捕获后代组件错误（返回 false 阻止继续向上传播） |
+| onServerPrefetch | serverPrefetch | SSR 数据预取 |
+
+**父子组件执行顺序：**
+
+```
+挂载：父 setup → 子 beforeMount/mounted → 父 mounted
+更新：父 beforeUpdate → 子 beforeUpdate/updated → 父 updated
+卸载：父 beforeUnmount → 子 beforeUnmount/unmounted → 父 unmounted
+```
+
+**高频追问：**
+
+1. 请求放 onMounted 还是 setup？都可以，但 onMounted 保证 DOM 和父子关系已就绪，且 SSR 下不会执行（setup 会执行），放 onMounted 更安全；需要 SSR 预取用 onServerPrefetch
+2. 为什么 Vue3 没有 beforeCreate/created 了？setup 统一了初始化逻辑，选项合并层不再需要这两个钩子
+3. onUpdated 里直接改状态会怎样？会反复触发更新死循环，必须加条件判断
+
+### 4.5 effectScope：批量管理副作用
+
+```js
+const scope = effectScope()
+
+scope.run(() => {
+  const count = ref(0)
+  watchEffect(() => console.log(count.value))
+  const doubled = computed(() => count.value * 2)
+})
+
+scope.stop() // 一次性停止 scope 内所有 effect / computed / watch
+```
+
+- 应用场景：组件卸载时副作用自动清理；但"在非组件上下文或事件回调里动态创建 watch/computed"时，Vue 不知道何时回收，需要 effectScope 手动管理，避免内存泄漏
+- 相关 API：`getCurrentScope()`、`onScopeDispose()`（类似 onUnmounted，但作用于 scope）
+- **面试话术：** 组件级副作用由 Vue 自动回收；非组件生命周期内创建的副作用要靠 effectScope 批量 stop
+
 ---
 
 ## 五、组件更新调度
@@ -386,7 +547,115 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 
 ---
 
-## 六、高频面试题速答
+## 六、组件通信与内置组件原理
+
+### 6.1 props / emit / attrs / expose 模型
+
+- props 是单向数据流：父传子，子组件不能直接改；props 对象本质是 shallowReadonly，修改会告警
+- emit 用于子 → 父：`defineEmits(['update:title'])` 声明后 `emit('update:title', v)`；Vue3 中不再有 `$on / $off` 事件总线
+- attrs：未被子组件声明为 props/emits 的属性与监听器（Vue3 中事件监听器也在 attrs 里）；`inheritAttrs: false` 可控制是否自动落到根节点
+- expose：`defineExpose()` 明确暴露给父组件通过模板 ref 访问的能力，其余一律私有（Vue3 默认不暴露实例上的所有内容）
+
+**一句话模型：** props 向下、emit 向上、provide/inject 穿透、slots 内容分发、ref + expose 命令式访问。
+
+### 6.2 provide / inject 原理
+
+- provide 把值挂到当前组件实例的 `provides` 对象上；inject 沿组件实例链向上查找（源码利用 provides 对象间的原型链继承）
+- **默认不是响应式**：provide 一个普通对象，后代改值不会同步；要响应式必须 provide ref/reactive 本身
+- 应用级注入：`app.provide(key, value)`，所有组件可注入
+- 适用场景：主题、用户信息、国际化、依赖注入式配置
+
+### 6.3 keep-alive 原理（LRU 缓存）
+
+- keep-alive 不渲染真实元素，而是拦截组件 vnode，把子树缓存到内部 cache
+- 命中缓存：不重新创建组件实例，直接复用 vnode 和 DOM，触发 onActivated
+- 淘汰策略：LRU——`max` 限制缓存数量，超出时淘汰最久未使用的实例
+- include / exclude 控制缓存名单；常与 `<component :is>` 配合
+- **面试话术：** 本质是"组件实例级缓存 + LRU 淘汰"，所以能保留滚动位置、输入内容和内部状态
+
+### 6.4 Teleport 原理
+
+- 把子树渲染到目标 DOM 节点：`<Teleport to="#modal">`，内部 vnode 的 el 直接挂载到 target
+- 组件逻辑仍属于父组件：事件冒泡、依赖收集、provide/inject 都保持原组件树关系，只是 DOM 位置变了
+- Vue 3.5+ 支持 `defer`：目标元素由 Vue 后续渲染时，也能等当前渲染周期结束后再挂载
+- 适用：Modal、Toast、Dropdown，避免被父级 overflow 或层叠上下文裁剪
+
+### 6.5 Transition / TransitionGroup 原理
+
+- 进入：插入 DOM → 添加 enter-from（首帧）→ 下一帧移除并添加 enter-active → transitionend/超时后移除并触发 after-enter
+- 离开：添加 leave-from → 下一帧 leave-active → transitionend 后移除 DOM
+- 支持 JS 钩子（beforeEnter / enter / afterEnter / leave / afterLeave），返回 Promise 可精确控制结束时机
+- TransitionGroup 对列表增删做单个元素过渡，key 是定位依据
+
+### 6.6 Suspense 原理
+
+- 组件树中存在异步依赖（async setup / async 组件）时，先渲染 fallback；全部 resolve 后渲染真实内容
+- **面试重点：** Suspense 在 Vue3 中更多是"实验性边界"，SSR 场景才真正成熟；Vapor Mode 当前不支持 Suspense（见第七章）
+
+### 6.7 v-if / v-show / 自定义指令
+
+- v-if：条件渲染，false 时节点不创建（卸载）；v-show：始终渲染，仅切换 `display`
+- 切换频繁用 v-show（保留 DOM 和状态）；首屏不需要用 v-if（减少创建开销）
+- 自定义指令钩子：created → beforeMount → mounted → beforeUpdate → updated → beforeUnmount → unmounted；典型场景：权限、聚焦、水印、埋点
+
+---
+
+## 七、Vue 3.5 / 3.6 新特性（2025–2026 新考点）
+
+### 7.1 Vue 3.5 响应式重构：双向链表 + 版本计数
+
+- 依赖结构从 Set 集合改为**双向链表**：遍历/删除依赖更快，整体内存占用减少约 56%
+- **版本计数**：每个依赖维护 version，computed 先比较版本是否变化，未变化直接返回缓存，避免重复计算和陈旧值问题
+- 深响应式大数组操作最高提升约 10 倍
+- **面试话术：** 3.5 没有改变"track/trigger"模型，而是把依赖的数据结构换成了双向链表 + 版本号，让依赖收集/触发和 computed 缓存判断更快、更省内存
+
+### 7.2 Vue 3.5 实用新 API
+
+| API | 作用 |
+|---|---|
+| reactive props 解构（稳定） | `const { count = 0 } = defineProps()` 用原生默认值语法；解构变量仍响应式，但 watch/composable 需 getter / toValue |
+| useTemplateRef() | 运行时按字符串 id 取模板 ref，支持动态 ref 名 |
+| useId() | 生成 SSR 稳定的唯一 id，避免水合不一致 |
+| defineModel()（3.4 稳定） | v-model 双绑定的声明式封装 |
+| onWatcherCleanup() | watch 回调内的清理注册（如 AbortController） |
+| defineAsyncComponent hydrate | 控制 SSR 组件水合时机：hydrateOnVisible 等 |
+| `<Teleport defer>` | 目标节点稍后渲染也能挂载 |
+| data-allow-mismatch | 主动豁免已知的水合不一致告警 |
+
+### 7.3 Vue 3.6：alien-signals + Vapor Mode（2025-12 beta → 2026 进入 RC）
+
+**alien-signals（响应式引擎重构）：**
+
+- `@vue/reactivity` 底层改为 alien-signals，ref 内部就是 signal
+- 官方 beta 说明：响应式性能比 3.5 快约 1.8 倍、computed 吞吐量提升 30 倍以上、内存占用进一步下降（beta 数据，以正式版为准）
+- 对现有代码无破坏性变更
+- 版本节奏：3.6 于 2025 年 12 月进入 beta（beta.17 于 2026-06-24 发布），随后进入 RC 阶段，正式版尚未发布
+
+**Vapor Mode（无虚拟 DOM 编译模式）：**
+
+- 编译期直接生成操作真实 DOM 的指令，跳过 VNode 创建与 diff
+- 按组件可选启用：`<script setup vapor>` 或文件名 `MyComp.vapor.vue`；`createVaporApp()` 是实验性的全 Vapor 应用 API
+- 可与虚拟 DOM 组件在同一组件树中混用；Options API、Suspense、`app.config.globalProperties` / `getCurrentInstance()` 暂不支持
+- **面试话术：** Vapor Mode 不是"淘汰虚拟 DOM"，而是给高频叶子组件提供第二条编译路径——用编译时的确定性替换运行时的 diff 开销
+
+### 7.4 2026 面试趋势判断
+
+- 搜索到的 2026 大厂面经中，Vue 考点仍集中在：响应式原理（Proxy / track / trigger）、diff 优化、生命周期、组件通信、keep-alive、v-model 原理
+- 加分项：能主动讲清 Vue 3.5 响应式重构、Vapor Mode 与 alien-signals 的定位——这是"持续关注最新技术趋势"的高级岗信号
+- 参考来源见文末
+
+---
+
+## 八、SSR 与水合（进阶考点）
+
+- SSR：服务端把组件渲染成 HTML 字符串，客户端再"接管"事件与响应式，这个过程叫 hydration（水合）
+- 水合不一致：服务端与客户端渲染结果不同（日期、随机数、浏览器 API），Vue 会告警并强制客户端重新渲染
+- 解决手段：`useId()` 生成稳定 id、`data-allow-mismatch` 主动豁免、懒水合（`defineAsyncComponent` 的 hydrate 策略：可见/空闲/交互时再水合）
+- **面试话术：** SSR 的价值是首屏时间和 SEO，代价是水合复杂度与服务器成本；高级岗要能讲清 mismatch 的产生原因与处理手段
+
+---
+
+## 九、高频面试题速答
 
 ### Q: Vue3 为什么用 Proxy 代替 Object.defineProperty？
 
@@ -416,8 +685,59 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 - 更好的 TypeScript 支持
 - 支持 tree-shaking
 
+### Q: v-model 的原理是什么？
+
+- 原生元素按类型展开为 value/checked + 对应事件
+- 组件上是语法糖：`modelValue` prop + `update:modelValue` 事件
+- `defineModel()` 编译后仍是 prop + emit，只是开发者写法更简洁
+
+### Q: key 的作用是什么？为什么不能用 index？
+
+- key 是 diff 判断"同一个节点"的依据，同 key 同类型原地 patch，key 变化才卸载重建
+- index 在头部增删时会整体错位，复用错误 DOM 导致输入框内容、组件状态错乱；应使用业务唯一 id
+
+### Q: keep-alive 的实现原理？
+
+- 拦截组件 vnode，缓存实例与 DOM，命中时直接复用并触发 onActivated
+- LRU 淘汰：max 超限时淘汰最久未使用的实例
+- include/exclude 控制缓存名单
+
+### Q: watch 和 watchEffect 什么时候用？
+
+- 需要精确控制监听源、需要 old/new 值、需要配置 deep/immediate → watch
+- 需要自动追踪依赖、逻辑就是"依赖变了就执行" → watchEffect
+- 两者都支持 flush: pre/post/sync；DOM 更新后访问用 flush: 'post' 或 watchPostEffect
+
+### Q: provide/inject 是响应式的吗？
+
+- 默认不是：provide 普通对象，后代不会自动同步
+- provide 一个 ref/reactive 本身，后代拿到的是同一响应式对象，天然响应式
+- 源码实现：provides 对象原型链继承，inject 沿链向上查找
+
+### Q: Vue 3.5 对响应式做了什么重构？
+
+- 依赖从 Set 改成双向链表，内存减少约 56%
+- 引入版本计数，computed 先比较版本再决定是否重算，解决陈旧值与多余计算
+- 深响应式大数组操作最高提升约 10 倍；没有行为变化，API 完全兼容
+
+### Q: Vapor Mode 是什么？
+
+- Vue 3.6（beta）新增的编译模式：跳过虚拟 DOM，编译期直接生成操作真实 DOM 的指令
+- 按组件 opt-in（`<script setup vapor>` / `.vapor.vue`），可与虚拟 DOM 组件混用
+- 不是淘汰虚拟 DOM，而是给高频组件提供"零 diff 开销"的第二条路径
+
 ---
 
-## 七、交互式 Demo
+## 十、交互式 Demo
 
-打开 [Vue3 响应式系统可视化](./vue3-reactivity-demo.html) 看 Proxy 如何拦截操作、effect 如何收集依赖。
+打开 [Vue3 响应式系统可视化](./vue3-reactivity-demo.html) 看 Proxy 如何拦截操作、effect 如何收集依赖，以及新增/删除属性为什么 Vue2 做不到。
+
+---
+
+## 十一、参考资料（2025–2026 趋势来源）
+
+- Vue 官方博客：Announcing Vue 3.5（响应式重构、props 解构、useTemplateRef、useId、懒水合等）— https://blog.vuejs.org/posts/vue-3-5
+- Vue 官方 GitHub：v3.6.0-beta.1 Release Notes（Vapor Mode、alien-signals）— https://github.com/vuejs/core/releases/tag/v3.6.0-beta.1
+- 掘金：Vue 3.6 还没正式发布，但前端的方向已经被它定下来了（2026-07）— https://juejin.cn/post/7660079523232399402
+- CSDN：大厂前端面试最新整理笔记（2026-02，Vue 编译/性能优化/Modal 设计等）— https://blog.csdn.net/WYiQIU/article/details/157652339
+- 三年前端面试复盘：字节阿里美团高频题与手写源码解析（2026-04）— https://zeeklog.com/2026chun-zhao-san-nian-qian-duan-xie-lei-mian-jing-na-xia-zi-jie-a-li-mei-tuan-offer-zhe-xie-gao-pin-ti-ni-bi-xu-zhang-wo-fu-shou-xie-yuan-ma-9

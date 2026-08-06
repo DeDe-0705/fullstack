@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vue3 响应式系统可视化 Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
+
+  .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .code-panel, .viz-panel { background: #1e293b; border-radius: 8px; padding: 16px; }
+  .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; }
+
+  pre { background: #0f172a; border-radius: 6px; padding: 12px; font-size: 12px; line-height: 1.55; overflow-x: auto; }
+  .kw { color: #c084fc; } .str { color: #34d399; } .cmt { color: #64748b; }
+  .blt { color: #38bdf8; } .num { color: #fbbf24; } .mtd { color: #fb923c; }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  button { padding: 8px 14px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  button:hover { border-color: #38bdf8; background: #0f172a; }
+  button.run { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  button.run:hover { background: #1d4ed8; }
+  button.danger:hover { border-color: #f87171; }
+
+  .output { background: #0f172a; border-radius: 6px; padding: 12px; min-height: 220px; max-height: 300px; overflow-y: auto; font-family: "SF Mono", monospace; font-size: 12px; }
+  .output-line { padding: 3px 0; border-bottom: 1px solid rgba(51,65,85,.4); animation: fadeIn .25s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .l-track { color: #38bdf8; }
+  .l-trigger { color: #fbbf24; }
+  .l-render { color: #34d399; }
+  .l-reset { color: #94a3b8; }
+
+  .state-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #334155; border-radius: 6px; margin-bottom: 8px; background: #0f172a; }
+  .state-key { font-family: "SF Mono", monospace; color: #38bdf8; min-width: 90px; }
+  .state-val { font-family: "SF Mono", monospace; color: #fbbf24; flex: 1; word-break: break-all; }
+  .state-tag { font-size: 11px; color: #64748b; }
+  .empty { color: #64748b; font-size: 13px; padding: 12px 0; }
+
+  .dep-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #334155; border-radius: 6px; margin-bottom: 8px; background: #0f172a; }
+  .dep-key { font-family: "SF Mono", monospace; color: #38bdf8; min-width: 90px; }
+  .dep-bar-wrap { flex: 1; background: #1e293b; border-radius: 4px; height: 8px; overflow: hidden; }
+  .dep-bar { height: 100%; background: #34d399; border-radius: 4px; transition: width .3s ease; }
+  .dep-count { font-family: "SF Mono", monospace; font-size: 12px; color: #94a3b8; min-width: 90px; text-align: right; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: #94a3b8; margin-bottom: 16px; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .d-track { background: #38bdf8; }
+  .d-trigger { background: #fbbf24; }
+  .d-render { background: #34d399; }
+
+  @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Vue3 响应式系统可视化</h1>
+  <p class="subtitle">简化版 Proxy + track / trigger 实现，点击按钮观察依赖收集与更新触发</p>
+
+  <div class="legend">
+    <span><i class="dot d-track"></i>track：收集依赖</span>
+    <span><i class="dot d-trigger"></i>trigger：触发更新</span>
+    <span><i class="dot d-render"></i>render：effect 重新执行</span>
+  </div>
+
+  <div class="main-grid">
+    <div class="code-panel">
+      <div class="panel-title">核心实现（简化版）</div>
+<pre><span class="cmt">// 全局依赖容器</span>
+<span class="kw">const</span> targetMap = <span class="kw">new</span> <span class="blt">WeakMap</span>();
+<span class="kw">let</span> activeEffect = <span class="kw">null</span>;
+
+<span class="kw">function</span> <span class="mtd">track</span>(target, key) {
+  <span class="cmt">// state.count 被读取 → 把当前 effect 记入依赖</span>
+  <span class="blt">getDep</span>(target, key).<span class="mtd">add</span>(activeEffect);
+}
+
+<span class="kw">function</span> <span class="mtd">trigger</span>(target, key) {
+  <span class="cmt">// state.count 被修改 → 取出依赖并重新执行</span>
+  <span class="kw">const</span> dep = targetMap.<span class="mtd">get</span>(target)?.<span class="mtd">get</span>(key);
+  <span class="kw">if</span> (dep) [...dep].<span class="mtd">forEach</span>(fn => fn());
+}
+
+<span class="kw">function</span> <span class="mtd">reactive</span>(target) {
+  <span class="kw">return new</span> <span class="blt">Proxy</span>(target, {
+    <span class="mtd">get</span>(target, key, receiver) {
+      <span class="mtd">track</span>(target, key);          <span class="cmt">// 读取时收集</span>
+      <span class="kw">return</span> <span class="blt">Reflect</span>.<span class="mtd">get</span>(target, key, receiver);
+    },
+    <span class="mtd">set</span>(target, key, value, receiver) {
+      <span class="kw">const</span> old = target[key];
+      <span class="kw">const</span> ok = <span class="blt">Reflect</span>.<span class="mtd">set</span>(target, key, value, receiver);
+      <span class="kw">if</span> (old !== value) <span class="mtd">trigger</span>(target, key); <span class="cmt">// 写入时触发</span>
+      <span class="kw">return</span> ok;
+    },
+    <span class="mtd">deleteProperty</span>(target, key) {
+      <span class="kw">const</span> had = <span class="blt">hasOwn</span>(target, key);
+      <span class="kw">const</span> ok = <span class="blt">Reflect</span>.<span class="mtd">deleteProperty</span>(target, key);
+      <span class="kw">if</span> (had && ok) <span class="mtd">trigger</span>(target, key); <span class="cmt">// 删除也能感知</span>
+      <span class="kw">return</span> ok;
+    }
+  });
+}</pre>
+      <div class="btn-row">
+        <button class="run" onclick="inc()">state.count++</button>
+        <button onclick="rename()">state.name = '张三'</button>
+        <button onclick="addAge()">新增 age 属性</button>
+        <button class="danger" onclick="delCount()">删除 count 属性</button>
+        <button onclick="resetAll()">重置</button>
+      </div>
+      <div class="output" id="output">
+        <div style="color:#64748b;font-size:12px;">点击上方按钮观察 track / trigger / render 过程...</div>
+      </div>
+    </div>
+
+    <div class="viz-panel">
+      <div class="panel-title">state 对象（Proxy 视图）</div>
+      <div id="stateView"></div>
+      <div class="panel-title" style="margin-top:20px;">targetMap：依赖收集结果</div>
+      <div id="depView"></div>
+      <div class="empty" id="hint">点击按钮后，这里会展示 state 上每个属性被哪些 effect 依赖。</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- 简化版 Vue3 响应式 ----------
+const targetMap = new WeakMap();
+let activeEffect = null;
+const rawState = { count: 0, name: '德德' };
+
+function getDep(target, key) {
+  let depsMap = targetMap.get(target);
+  if (!depsMap) {
+    depsMap = new Map();
+    targetMap.set(target, depsMap);
+  }
+  let dep = depsMap.get(key);
+  if (!dep) {
+    dep = new Set();
+    depsMap.set(key, dep);
+  }
+  return dep;
+}
+
+function track(target, key) {
+  if (!activeEffect) return;
+  const dep = getDep(target, key);
+  if (!dep.has(activeEffect)) {
+    dep.add(activeEffect);
+    addLog(`track: state.${key} 被读取 → 收集依赖（当前 ${dep.size} 个 effect）`, 'track');
+    renderViz();
+  }
+}
+
+function trigger(target, key) {
+  const depsMap = targetMap.get(target);
+  const dep = depsMap && depsMap.get(key);
+  if (!dep || dep.size === 0) {
+    addLog(`trigger: state.${key} 变化，但没有 effect 依赖它`, 'trigger');
+    renderViz();
+    return;
+  }
+  addLog(`trigger: state.${key} 变化 → 执行 ${dep.size} 个 effect`, 'trigger');
+  renderViz();
+  [...dep].forEach(fn => fn());
+}
+
+function reactive(target) {
+  return new Proxy(target, {
+    get(target, key, receiver) {
+      track(target, key);
+      const result = Reflect.get(target, key, receiver);
+      if (typeof result === 'object' && result !== null) return reactive(result);
+      return result;
+    },
+    set(target, key, value, receiver) {
+      const old = target[key];
+      const ok = Reflect.set(target, key, value, receiver);
+      if (old !== value) trigger(target, key);
+      return ok;
+    },
+    deleteProperty(target, key) {
+      const had = Object.prototype.hasOwnProperty.call(target, key);
+      const ok = Reflect.deleteProperty(target, key);
+      if (had && ok) trigger(target, key);
+      return ok;
+    }
+  });
+}
+
+const state = reactive(rawState);
+
+function effect(fn) {
+  activeEffect = fn;
+  fn();
+  activeEffect = null;
+  return fn;
+}
+
+// ---------- 可视化 ----------
+const output = document.getElementById('output');
+let logCount = 0;
+
+function addLog(msg, type) {
+  logCount++;
+  const line = document.createElement('div');
+  line.className = `output-line l-${type}`;
+  line.textContent = `[${String(logCount).padStart(2, '0')}] ${msg}`;
+  output.appendChild(line);
+  while (output.children.length > 30) output.removeChild(output.firstChild);
+  output.scrollTop = output.scrollHeight;
+}
+
+function renderViz() {
+  // state 视图
+  const stateView = document.getElementById('stateView');
+  const keys = Object.keys(rawState);
+  stateView.innerHTML = keys.length
+    ? keys.map(k => `
+        <div class="state-row">
+          <span class="state-key">state.${k}</span>
+          <span class="state-val">${JSON.stringify(rawState[k])}</span>
+          <span class="state-tag">Proxy 可拦截</span>
+        </div>`).join('')
+    : '<div class="empty">state 已为空（试试重置）</div>';
+
+  // 依赖视图
+  const depView = document.getElementById('depView');
+  const hint = document.getElementById('hint');
+  const depsMap = targetMap.get(rawState);
+  if (!depsMap || depsMap.size === 0) {
+    depView.innerHTML = '';
+    hint.style.display = '';
+    return;
+  }
+  hint.style.display = 'none';
+  const rows = [...depsMap.entries()].map(([key, dep]) => {
+    const pct = Math.min(100, dep.size * 100);
+    return `
+      <div class="dep-row">
+        <span class="dep-key">state.${key}</span>
+        <div class="dep-bar-wrap"><div class="dep-bar" style="width:${pct}%"></div></div>
+        <span class="dep-count">${dep.size} 个 effect</span>
+      </div>`;
+  }).join('');
+  depView.innerHTML = rows;
+}
+
+// ---------- 交互 ----------
+function inc() { state.count++; }
+function rename() { state.name = '张三'; }
+function addAge() {
+  state.age = 26;
+  addLog('提示：新增属性被 Proxy 感知（Vue2 需要 Vue.set）', 'trigger');
+}
+function delCount() {
+  delete state.count;
+  addLog('提示：删除属性被 Proxy 感知（Vue2 需要 Vue.delete）', 'trigger');
+}
+
+function resetAll() {
+  if ('age' in rawState) delete rawState.age;
+  rawState.count = 0;
+  rawState.name = '德德';
+  targetMap.delete(rawState);
+  output.innerHTML = '<div style="color:#64748b;font-size:12px;">已重置，effect 重新执行...</div>';
+  logCount = 0;
+  effect(render);
+  renderViz();
+  addLog('重置完成', 'reset');
+}
+
+function render() {
+  addLog(`render: count=${state.count}, name=${state.name}`, 'render');
+}
+
+// 初始化：effect 首次执行收集依赖
+effect(render);
+renderViz();
+addLog('初始化完成：render effect 已收集 state.count / state.name 的依赖', 'reset');
+</script>
+</body>
+</html>
