@@ -699,12 +699,37 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 - include / exclude 控制缓存名单；常与 `<component :is>` 配合
 - **面试话术：** 本质是"组件实例级缓存 + LRU 淘汰"，所以能保留滚动位置、输入内容和内部状态
 
-### 6.4 Teleport 原理
+### 6.4 Teleport 原理与用法
 
-- 把子树渲染到目标 DOM 节点：`<Teleport to="#modal">`，内部 vnode 的 el 直接挂载到 target
-- 组件逻辑仍属于父组件：事件冒泡、依赖收集、provide/inject 都保持原组件树关系，只是 DOM 位置变了
-- Vue 3.5+ 支持 `defer`：目标元素由 Vue 后续渲染时，也能等当前渲染周期结束后再挂载
-- 适用：Modal、Toast、Dropdown，避免被父级 overflow 或层叠上下文裁剪
+**核心：** Teleport 拆开"渲染位置"和"逻辑归属"两件事——DOM 挂到 `to` 指定的节点，组件逻辑（props、emit、provide/inject、生命周期、插槽）仍按原组件树走。
+
+```vue
+<template>
+  <div class="page">
+    <!-- 逻辑上：modal 仍是 page 的子组件 -->
+    <Teleport to="body">
+      <div class="modal">
+        <button @click="close">关闭</button>
+      </div>
+    </Teleport>
+  </div>
+</template>
+```
+
+**三个常用属性：**
+
+- `to`：CSS 选择器（如 `"#modal"`、`"body"`）或真实 DOM 元素；多个 Teleport 指向同一目标时按顺序追加
+- `disabled`：为 true 时禁用传送，内容留在原地（移动端回退内嵌布局）
+- `defer`（Vue 3.5+）：目标元素稍后由 Vue 渲染也能挂载；默认情况下挂载时目标必须已存在
+
+**典型场景：** Modal、Toast、Dropdown、Tooltip、全屏遮罩——避免被父级 `overflow: hidden`、`transform`、低 `z-index` 裁剪或覆盖。
+
+**事件冒泡的面试细节：**
+
+- 组件逻辑层：props、emit、provide/inject、生命周期全部保留，和原来一样
+- 原生 DOM 事件层：真实 DOM 上的事件冒泡（如 click）遵循**挂载后的 DOM 结构**——Teleport 到 body 后，内容不会经过原父组件的真实 DOM 节点，依赖"点击子元素冒泡到父元素"的链路会断
+
+**一句话：** 组件树不动，DOM 树搬家。
 
 ### 6.5 Transition / TransitionGroup 原理
 
