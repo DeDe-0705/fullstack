@@ -660,6 +660,27 @@ await nextTick()
 console.log(document.querySelector('p').textContent) // 'World'
 ```
 
+**nextTick vs requestAnimationFrame vs requestIdleCallback（面试对比）：**
+
+| API | 执行时机 | 优先级 | 典型用途 | 兼容性 |
+|---|---|---|---|---|
+| nextTick | 微任务，Vue 更新队列 flush 后立即执行 | 高（本轮事件循环内） | 改完数据马上读最新 DOM | 所有环境（含 SSR） |
+| requestAnimationFrame | 下一帧重绘前，与刷新率同步 | 中（跟帧走） | 动画、帧同步 DOM 读写 | 全平台 |
+| requestIdleCallback | 一帧渲染完成后的空闲期 | 低（可能不执行） | 埋点、日志、大任务切片 | Safari 不支持，生产需 polyfill |
+
+一帧内的大致时间线：
+
+```
+宏任务（事件回调）
+  → 微任务（nextTick 在这一层）
+  → requestAnimationFrame 回调
+  → 样式计算 / 布局 / 绘制
+  → requestIdleCallback 回调（有空闲才执行）
+  → 下一个宏任务
+```
+
+**为什么 nextTick 不用 rAF / rIC？** nextTick 要保证"DOM 更新后立刻回调"，微任务排在 Vue 的批量更新（同样是微任务）之后立即执行，确定性最强；rAF 与刷新率绑定，且非浏览器环境（SSR）不可用；rIC 优先级太低可能一直不执行，无法满足"必须拿到更新后 DOM"的场景。
+
 ### 5.2 异步更新队列
 
 ```
