@@ -59,6 +59,61 @@ function reactive(target) {
 }
 ```
 
+### 1.2.1 Proxy 与 Reflect 深度（面试深挖）
+
+**Reflect 是什么：** ES6 新增的内置对象（不是构造函数，不能 `new`），把 JS 语言内部的属性操作以函数形式暴露出来，与 Proxy 的陷阱一一对应，充当 Proxy 的"默认行为镜像"。
+
+**Reflect 的设计动机：**
+
+1. **操作符函数化**：`in` / `delete` / `new` 是操作符，无法作为值传递；`Reflect.has` / `Reflect.deleteProperty` / `Reflect.construct` 把它们变成普通函数
+2. **与 Proxy 对称**：陷阱负责拦截，Reflect 负责原样执行"不拦截时会发生的默认行为"
+3. **统一成败表达**：`Reflect.set` / `Reflect.deleteProperty` / `Reflect.defineProperty` 返回布尔值，而 `Object.defineProperty` 失败是抛异常
+4. **语义更严格**：`Reflect.ownKeys` 能拿到不可枚举和 Symbol key，`Object.keys` 只拿可枚举字符串；Reflect 对原始值直接抛 TypeError，Object 则先装箱
+
+**为什么 Vue 必须用 `Reflect.get`：receiver 决定 this**
+
+```js
+const raw = { a: 1, get b() { return this.a } }
+
+// ❌ 直接 target[key]
+// getter 里的 this 指向原始对象 raw，内部访问 raw.a 绕过代理
+// → 模板访问 state.b 时，a 的依赖收集会漏掉
+
+// ✅ Reflect.get(target, key, receiver)
+// getter 里的 this 指向代理对象（receiver）
+// → 内部访问 this.a 会再次走进 get 陷阱 → a 也被 track
+```
+
+所以源码里 get 陷阱的标准写法是：先 `track(target, key)`，再用 `Reflect.get(target, key, receiver)` 返回值——两步都不能省。
+
+**常用陷阱与 Reflect 对照：**
+
+| 陷阱 | 典型用途 | 委托写法 |
+|---|---|---|
+| get | 读取时 track | Reflect.get(target, key, receiver) |
+| set | 写入时 trigger | Reflect.set(target, key, value, receiver) |
+| has | 支持 `'x' in state` 的依赖收集 | Reflect.has(target, key) |
+| deleteProperty | 删除时 trigger | Reflect.deleteProperty(target, key) |
+| ownKeys | `Object.keys` / `for...in` 的依赖收集 | Reflect.ownKeys(target) |
+
+**has / ownKeys 与 ITERATE_KEY：** `'x' in state` 和 `for...in` 也是响应式场景。新增/删除属性时，所有遍历了对象 key 的 effect 都要触发，Vue 内部用特殊的 `ITERATE_KEY` 标记这类依赖。
+
+**Object vs Reflect 差异速查：**
+
+| 场景 | Object | Reflect |
+|---|---|---|
+| 拿全部 key | Object.keys 只有可枚举字符串 | Reflect.ownKeys 含不可枚举 + Symbol |
+| 定义属性失败 | 抛 TypeError | 返回 false |
+| 对原始值操作 | 会装箱（如 Object.keys('a')） | 直接抛 TypeError |
+
+**Proxy 的三个局限（面试常追）：**
+
+1. 只能代理对象，基本类型要靠 `ref` 包装
+2. `Object.freeze()` 后的对象无法触发 set，Vue 会告警
+3. 有"不变量"约束：非可配置且非可写的属性，get 必须返回真实值，否则抛 TypeError
+
+**面试话术：** "Proxy 负责拦截，Reflect 负责还原"——Reflect 让陷阱能保持默认行为，并通过 receiver 把 getter/setter 的 this 指向代理对象，保证嵌套访问的依赖收集不遗漏。
+
 ### 1.3 ref 的实现原理
 
 ```js
@@ -736,6 +791,8 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 
 ## 十一、参考资料（2025–2026 趋势来源）
 
+- MDN：Proxy — https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Proxy
+- MDN：Reflect — https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Reflect
 - Vue 官方博客：Announcing Vue 3.5（响应式重构、props 解构、useTemplateRef、useId、懒水合等）— https://blog.vuejs.org/posts/vue-3-5
 - Vue 官方 GitHub：v3.6.0-beta.1 Release Notes（Vapor Mode、alien-signals）— https://github.com/vuejs/core/releases/tag/v3.6.0-beta.1
 - 掘金：Vue 3.6 还没正式发布，但前端的方向已经被它定下来了（2026-07）— https://juejin.cn/post/7660079523232399402
