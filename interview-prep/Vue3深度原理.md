@@ -153,7 +153,9 @@ set(target, key, value, receiver) {
 2. `Object.freeze()` 后的对象无法触发 set，Vue 会告警
 3. 有"不变量"约束：非可配置且非可写的属性，get 必须返回真实值，否则抛 TypeError
 
-**面试话术：** "Proxy 负责拦截，Reflect 负责还原"——Reflect 让陷阱能保持默认行为，并通过 receiver 把 getter/setter 的 this 指向代理对象，保证嵌套访问的依赖收集不遗漏。
+**面试话术（收尾版）：** "Proxy 负责拦截，Reflect 负责还原"——Reflect 让陷阱能保持默认行为，并通过 receiver 把访问者的身份（this）沿访问链传递下去：getter/setter 内部再访问其他属性时，仍然以代理身份走进陷阱，依赖收集和触发更新不会断链。
+
+注意措辞：这不是 receiver 主动"递归遍历"所有属性，而是"访问链上的每一步都经过代理"；嵌套对象也是惰性包装，访问到才代理。最终效果就是数据变更能完整通知到依赖它的视图。
 
 ### 1.3 ref 的实现原理
 
