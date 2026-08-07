@@ -86,6 +86,25 @@ const raw = { a: 1, get b() { return this.a } }
 
 所以源码里 get 陷阱的标准写法是：先 `track(target, key)`，再用 `Reflect.get(target, key, receiver)` 返回值——两步都不能省。
 
+**最直观的差异：get 陷阱被调用了几次**
+
+```
+错误版 target[key]：
+  访问 proxy.fullName
+  → get 陷阱：key=fullName → track 登记 fullName
+  → getter 的 this = raw → this.firstName 直接读原始对象
+  → 没有第二次陷阱调用 → firstName 从未登记 ❌
+
+正确版 Reflect.get(target, key, proxy)：
+  访问 proxy.fullName
+  → get 陷阱：key=fullName
+  → getter 的 this = proxy → this.firstName 走进第二次 get 陷阱
+  → track 登记 firstName ✅
+  → track 登记 fullName ✅
+```
+
+**结论：** track 不是"在 get 函数里手动执行一次"，而是"每次属性访问走进代理时自动执行一次"。`target[key]` 让 getter 内部的访问绕过代理，间接属性的依赖永远无法登记——首次渲染正常，之后修改间接属性，视图不更新（数据其实已经变了）。
+
 **receiver 到底是谁（面试第二层深挖）：**
 
 - 一句话：receiver 是"这次操作站在谁的角度执行"，会作为 getter/setter 内部 `this` 的指向；省略时默认等于 target
