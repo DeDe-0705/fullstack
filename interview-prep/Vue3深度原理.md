@@ -86,6 +86,28 @@ const raw = { a: 1, get b() { return this.a } }
 
 所以源码里 get 陷阱的标准写法是：先 `track(target, key)`，再用 `Reflect.get(target, key, receiver)` 返回值——两步都不能省。
 
+**receiver 到底是谁（面试第二层深挖）：**
+
+- 一句话：receiver 是"这次操作站在谁的角度执行"，会作为 getter/setter 内部 `this` 的指向；省略时默认等于 target
+- 区分两个对象：**target 是"属性定义处"，receiver 是"this 指向处"**
+- receiver 由引擎自动传递：`proxy.foo` → receiver 是 proxy 本身；如果 `child` 继承了 proxy，`child.foo` → receiver 是 child（原型链最末端）
+- 所以 getter 定义在原型上、`this` 却指向实例，正是靠 receiver 实现的
+
+set 陷阱里 receiver 同样关键——忽略它会把属性写到错误的对象上：
+
+```js
+// child 继承了 proxy（proto），对 proto 执行写入时 receiver 是 child
+set(target, key, value, receiver) {
+  return Reflect.set(target, key, value, receiver)
+  // ✅ 属性落在 child 自己身上，proto 不变（保持对象隔离）
+
+  // ❌ 直接 target[key] = value
+  // 属性落在 proto 上，所有继承者共享这次修改
+}
+```
+
+**记忆锚点：** target 决定"数据从哪来"，receiver 决定"this 指向谁"。丢掉 receiver，代理就只是表面拦截，原型链场景的语义会悄悄变歪。
+
 **常用陷阱与 Reflect 对照：**
 
 | 陷阱 | 典型用途 | 委托写法 |
