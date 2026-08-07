@@ -127,6 +127,21 @@ set(target, key, value, receiver) {
 
 **记忆锚点：** target 决定"数据从哪来"，receiver 决定"this 指向谁"。丢掉 receiver，代理就只是表面拦截，原型链场景的语义会悄悄变歪。
 
+**deleteProperty 的常见误区：删除属性不会删除依赖**
+
+```js
+deleteProperty(target, key) {
+  const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+  const result = Reflect.deleteProperty(target, key)
+  if (hadKey && result) trigger(target, key, TriggerOpTypes.DELETE)
+  return result
+}
+```
+
+- 依赖池的增删由"effect 是否还在读取这个 key"决定，不是由删除动作决定：例如 fullName 的 getter 在删除 firstName 后仍会读取 `this.firstName`（即使读到 undefined），所以 firstName 的依赖依然存在
+- Vue 中 ADD / DELETE 类型的触发还会额外触发 `ITERATE_KEY` 依赖（`for...in` / `Object.keys`）
+- 属性不存在 → hadKey 为 false → 不触发；属性不可配置 → `Reflect.deleteProperty` 返回 false，删除失败
+
 **常用陷阱与 Reflect 对照：**
 
 | 陷阱 | 典型用途 | 委托写法 |
