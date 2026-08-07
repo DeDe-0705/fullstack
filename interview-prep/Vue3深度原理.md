@@ -277,6 +277,30 @@ watchEffect(effect):
 
 **注意：** watchEffect 同样支持 `flush` 选项（默认 `pre`），并不是"无法控制执行时机"；它只是不像 watch 那样需要显式声明依赖源。Vue 3.5 起还提供全局 `onWatcherCleanup()` 在 watch 回调内注册清理函数（见第七章）。
 
+**flush 语义表（面试常追）：**
+
+| flush | 执行时机 | 典型场景 |
+|---|---|---|
+| pre（默认） | 数据变化后、组件重新渲染前，同 tick 批量 | 大多数业务逻辑（请求、状态派生） |
+| post | 组件重新渲染后，DOM 已更新 | 回调里读最新 DOM（高度、滚动位置、focus） |
+| sync | 数据一变立即同步执行，不批量 | 极少用，强实时性场景，性能差 |
+
+**watch 回调的清理（3.5+）：** 在回调内注册 `onWatcherCleanup(fn)`，下次回调触发或组件卸载时自动执行，适合取消上一次请求/定时器：
+
+```js
+watch(keyword, (val) => {
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () => fetch(`/api/search?q=${val}`, { signal: controller.signal }),
+    300
+  )
+  onWatcherCleanup(() => {
+    clearTimeout(timer)
+    controller.abort()
+  })
+})
+```
+
 ### 1.7 响应式进阶与边界（面试深挖区）
 
 **惰性响应式的两层（性能核心）：**
@@ -419,12 +443,25 @@ Vue3 快速 Diff 策略：
 
 **最长递增子序列 (LIS) 的应用：** 找出无需移动的节点，其余节点按需移动/创建/删除，将 DOM 操作降到最少。
 
+**中间乱序的具体步骤（以 [A,B,C] → [C,A,B] 为例）：**
+
+```
+1. 建索引：keyToNewIndexMap = { C: 0, A: 1, B: 2 }（key → 新位置）
+2. 按旧顺序遍历 [A, B, C]，查表得到新位置序列 seq = [1, 2, 0]；查不到的旧节点直接卸载
+3. 对 seq 求 LIS = [1, 2] → 对应 A、B 不用移动
+4. C（位置 0）需要移动：把 C 的 DOM insertBefore 到最前面
+```
+
+**面试话术：** keyToNewIndexMap 负责"快速定位旧节点的新位置"，LIS 负责"找出相对顺序未变的节点不动，其余节点围绕它们移动"，从而把 DOM 移动次数降到最少。
+
 ### 2.5 key 的作用与 v-for 注意事项
 
 - key 是 diff 判断"是否是同一个节点"的唯一依据：同 key 同类型 → 原地 patch；key 变化 → 卸载重建
 - 不要用 index 当 key：数组头部插入/删除时 index 全部错位，Vue 会复用错误的 DOM，导致输入框内容、组件状态错乱；优先用业务唯一 id
 - Vue3 中 `v-if` 的优先级高于 `v-for`（Vue2 相反），但同一元素上同时使用两者仍是反模式，应拆到 `<template>` 里
 - v-for 编译为 `KEYED_FRAGMENT (128)`，子节点走 keyed diff 路径
+
+**为什么 index 会导致输入框内容错位（面试深挖）：** 三行 A/B/C 用 index 作 key 时，删除 A 后新列表 B/C 的 key 变成 0/1——Vue 认为 key0 还是同一个节点，于是复用原来 A 的 DOM 原地 patch 成 B。文本更新了，但输入框这类 DOM 内部状态（用户输入、焦点、未受控状态）会残留，出现"第一行显示 B 的名字，输入框却留着 A 的值"。子组件同理：组件实例被复用，内部状态跟着位置走而非跟着数据走。
 
 ### 2.6 v-once / v-memo
 
@@ -707,17 +744,19 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 
 ### 6.2 provide / inject 原理
 
-- provide 把值挂到当前组件实例的 `provides` 对象上；inject 沿组件实例链向上查找（源码利用 provides 对象间的原型链继承）
-- **默认不是响应式**：provide 一个普通对象，后代改值不会同步；要响应式必须 provide ref/reactive 本身
+- provide 把值挂到当前组件实例的 `provides` 对象上；inject 沿组件实例链向上查找（源码利用 provides 对象间的原型链继承：子实例 provides 以父实例 provides 为原型，找不到 key 就沿原型链继续）
+- **provide/inject 本身不提供响应式**：它只是值传递机制。provide 普通对象，后代拿到同一份对象但不会被追踪，根组件整体替换新对象也不会通知后代；要响应式必须 provide ref/reactive 本身，后代读取时 track、修改时 trigger
+- inject 找不到 key 时返回默认值（`inject(key, default)`）否则为 undefined；中间组件是否 provide 不影响查找
 - 应用级注入：`app.provide(key, value)`，所有组件可注入
 - 适用场景：主题、用户信息、国际化、依赖注入式配置
 
 ### 6.3 keep-alive 原理（LRU 缓存）
 
-- keep-alive 不渲染真实元素，而是拦截组件 vnode，把子树缓存到内部 cache
+- keep-alive 不渲染真实元素，而是拦截组件 vnode，缓存 vnode 及其子树（背后挂着组件实例和 DOM），实例不销毁只是暂停渲染
 - 命中缓存：不重新创建组件实例，直接复用 vnode 和 DOM，触发 onActivated
-- 淘汰策略：LRU——`max` 限制缓存数量，超出时淘汰最久未使用的实例
-- include / exclude 控制缓存名单；常与 `<component :is>` 配合
+- 淘汰策略（LRU 内部机制）：内部用 `cache`（存 vnode）+ `keys`（维护访问顺序）两个 Map；每次命中/缓存时先把 key delete 再 set 排到队尾；超过 `max` 时淘汰 keys 的第一个 key（最久未使用），并真正卸载该组件（触发 onUnmounted）
+- include / exclude 按组件名控制缓存名单；`<script setup>` 组件需 `defineOptions({ name: 'Xxx' })` 才有名字；常与 `<component :is>` 配合
+- 生命周期：首次挂载 `onMounted → onActivated`；切走触发 `onDeactivated`（不触发 onUnmounted）；切回触发 `onActivated`（不触发 onMounted）；被 LRU 淘汰时才触发 `onUnmounted`
 - **面试话术：** 本质是"组件实例级缓存 + LRU 淘汰"，所以能保留滚动位置、输入内容和内部状态
 
 ### 6.4 Teleport 原理与用法
