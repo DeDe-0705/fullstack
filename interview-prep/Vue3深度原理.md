@@ -746,6 +746,8 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 
 - provide 把值挂到当前组件实例的 `provides` 对象上；inject 沿组件实例链向上查找（源码利用 provides 对象间的原型链继承：子实例 provides 以父实例 provides 为原型，找不到 key 就沿原型链继续）
 - **provide/inject 本身不提供响应式**：它只是值传递机制。provide 普通对象，后代拿到同一份对象但不会被追踪，根组件整体替换新对象也不会通知后代；要响应式必须 provide ref/reactive 本身，后代读取时 track、修改时 trigger
+- **传引用不复制**：provide 对象时，后代拿到的是同一个引用（`injected === provided` 为 true），不会深拷贝；所以子组件修改普通对象的属性，父组件的数据也会跟着变（只是不触发更新）
+- **重新 provide 不会更新旧引用**：inject 在子组件 setup 时读取一次并持有引用；provide 方换成新对象重新 provide 后，已注入的子组件仍持有旧引用，只有响应式对象内部属性变化才能驱动更新
 - inject 找不到 key 时返回默认值（`inject(key, default)`）否则为 undefined；中间组件是否 provide 不影响查找
 - 应用级注入：`app.provide(key, value)`，所有组件可注入
 - 适用场景：主题、用户信息、国际化、依赖注入式配置
