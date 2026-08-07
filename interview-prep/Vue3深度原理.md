@@ -279,6 +279,19 @@ watchEffect(effect):
 
 ### 1.7 响应式进阶与边界（面试深挖区）
 
+**惰性响应式的两层（性能核心）：**
+
+1. **对象包装惰性**：`reactive()` 创建时只代理最外层，嵌套对象在"被访问"时才包装成 Proxy（Vue2 是初始化时递归 defineProperty 所有属性，哪怕永远用不到）
+2. **依赖收集惰性**：只有"effect 执行期间真正读过的属性"才登记进依赖池；没读过的属性变更时 trigger 找不到依赖，零更新开销
+
+```js
+const state = reactive({ a: 1, b: 2, nested: { x: 10 } })
+// 创建时 nested 还没被代理；effect 只读 a → 依赖池只有 a
+// state.b = 99 → 不触发任何更新；首次读 nested.x 时才包装 nested
+```
+
+**面试话术：** Proxy 的拦截是"全能"的（所有属性的 get/set 都能看到），Vue 只是不为没读过的属性登记依赖——"惰性"指的是登记惰性，不是拦截惰性。
+
 **浅层响应式：** `shallowRef` / `shallowReactive` 只代理第一层，适合"整体替换、内部不变"的大对象；`triggerRef(shallowRef)` 可强制触发依赖。
 
 **跳过代理：** `markRaw` 标记对象永不被代理（第三方库实例、图标对象），避免无意义的劫持开销；`readonly` / `shallowReadonly` 做只读包装，组件的 props 本质就是 shallowReadonly。
