@@ -310,6 +310,12 @@ const LazyComponent = React.lazy(() => import('./Heavy'))
 
 **面试话术：** React 更偏"函数式"和"不可变数据"，更新粒度较粗需要手动优化；Vue 更偏"自动"，Proxy 精准追踪依赖，几乎不需要手动优化。技术选型取决于团队偏好和项目需求。
 
+### Vue 开发者转 React：三个必须补的差异
+
+1. **不可变数据 + 整体 re-render**：`setState` 产生新状态，组件函数整体重新执行，父组件渲染会带动子组件，需要 `memo` / `useMemo` / `useCallback` 手动优化；Vue 是可变数据 + 自动依赖追踪，更新更精准
+2. **Hooks 依赖数组 + 闭包**：`useEffect` 不会自动追踪依赖，需要手动声明 deps，依赖漏写或闭包过期值是最常见的坑；对应 Vue `watch` / `watchEffect` / `computed` 的自动追踪
+3. **JSX 是表达式而非模板**：`className`、style 对象、事件、key、Hooks 调用顺序都是 JS 语义；Vue 模板有编译期优化（PatchFlags / 静态提升），React 主要靠运行时 Fiber / 并发调度
+
 ---
 
 ## 七、高频面试题速答

@@ -111,6 +111,7 @@ const raw = { a: 1, get b() { return this.a } }
 - 区分两个对象：**target 是"属性定义处"，receiver 是"this 指向处"**
 - receiver 由引擎自动传递：`proxy.foo` → receiver 是 proxy 本身；如果 `child` 继承了 proxy，`child.foo` → receiver 是 child（原型链最末端）
 - 所以 getter 定义在原型上、`this` 却指向实例，正是靠 receiver 实现的
+- **receiver ≠ 函数调用时的 this**：receiver 由"属性访问表达式"决定，`obj.prop` 的 receiver 永远是 obj（访问链末端），与之后如何调用无关。`proxy.say.apply(brother)` 里，get 陷阱的 receiver 仍是 proxy（因为读取点是 `proxy.say`），brother 只是 `apply` 传给函数的调用 this——两套机制独立，别混。
 
 set 陷阱里 receiver 同样关键——忽略它会把属性写到错误的对象上：
 
@@ -229,6 +230,14 @@ trigger(target, key):
   2. 遍历 dep 中的所有 effect，加入调度队列
   3. 通过 scheduler 异步执行
 ```
+
+**大白话理解 Dep（Dependency）：** `dep` 不是"依赖项"，而是"**依赖这个属性的 effect 集合**"，源码里就是 `Set<ReactiveEffect>`（Vue 3.5 起改为双向链表）。打个比方：属性是电台，dep 是它的**订阅者名单**——渲染函数/计算属性/watchEffect 执行期间读过 `state.count`，就被登记进 `count` 的名单；`count` 一变，trigger 按名单逐个通知。
+
+三层结构的分工：`targetMap` 定位"哪个对象"，`depsMap` 定位"哪个属性"，`dep` 拿到"哪些 effect 要更新"。
+
+**为什么 targetMap 用 WeakMap 而不是 Map？** 如果 targetMap 是强引用 Map，那么每个 `reactive(obj)` 过的对象都会被永久钉在内存里，即使业务上已经没人再使用它。用 WeakMap 后：对象不再被业务代码引用 → 整张 depsMap 自动可回收，**不需要手动把它从依赖池里删掉**。
+
+注意边界：组件卸载时，Vue 还会主动 `stop(renderEffect)`，把渲染 effect 从它登记过的所有 dep 中移除。两件事是互补的——**卸载时主动清，对象失去引用时自动清**。
 
 ### 1.5 computed 原理（脏检查 + 懒执行）
 
@@ -938,6 +947,14 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 - Vue 3.6（beta）新增的编译模式：跳过虚拟 DOM，编译期直接生成操作真实 DOM 的指令
 - 按组件 opt-in（`<script setup vapor>` / `.vapor.vue`），可与虚拟 DOM 组件混用
 - 不是淘汰虚拟 DOM，而是给高频组件提供"零 diff 开销"的第二条路径
+
+### 2026-08-14 模拟面试暴露的易混淆点
+
+- **computed vs watch 不是"有没有返回值"**：computed 是同步纯函数 + 缓存 + 懒计算，适合派生状态；watch 是副作用，适合异步 / DOM / 防抖 / old-new 值。computed 的 getter 返回 Promise 不会自动 await，也不会触发更新，正确做法是 watch + ref 或 VueUse `computedAsync`
+- **shallowRef 为什么深层修改不触发**：只对 `.value` 做劫持，内部对象没有被 Proxy 代理；需要手动触发时用 `triggerRef`
+- **reactive 重新赋值会丢响应**：因为新对象没被 Proxy 包装；`ref` 通过替换 `.value` 天然规避这个问题
+- **v-model:title = `title` prop + `update:title` 事件**；`defineModel('title')` 只是把两者封装成可读写 ref，编译后仍是 prop + emit
+- **index 作 key 的经典现场**：头部插入时，新 index 0 复用旧 index 0 的组件实例，输入框残留旧数据状态，形成"张冠李戴"
 
 ---
 
