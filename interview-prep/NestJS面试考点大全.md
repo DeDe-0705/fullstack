@@ -223,6 +223,28 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
   → 响应返回
 ```
 
+### 3.1.1 官方完整顺序（含绑定粒度）
+
+```
+请求进来
+  1. Middleware：全局中间件 → 模块中间件（按注册顺序）
+  2. Guard：全局 → 控制器 → 路由
+  3. Interceptor（请求前）：全局 → 控制器 → 路由
+  4. Pipe：全局 → 控制器 → 路由 → 参数
+  5. Controller → Service
+  6. Interceptor（响应后）：路由 → 控制器 → 全局（逆序）
+  7. ExceptionFilter：路由 → 控制器 → 全局（就近优先）
+  8. Response
+```
+
+**关键记忆点：**
+- Guard / Interceptor / Pipe 都是"全局先执行、局部后执行"；响应路径上 Interceptor 逆序（局部先、全局后）
+- ExceptionFilter 相反：**局部优先，全局兜底**
+- Middleware 拿不到路由元数据，Guard 通过 `ExecutionContext` 能拿到 `@SetMetadata` 信息
+- 应用生命周期 hooks（`onModuleInit` / `onApplicationBootstrap` / `onModuleDestroy` 等）是另一套生命周期，别和请求生命周期混在一起
+
+**官方参考：** https://docs.nestjs.com/faq/request-lifecycle
+
 ### 3.2 Middleware（中间件）
 
 - 执行时机：进入 Guard 之前，在原生 Express/Fastify 层面执行。
@@ -1197,4 +1219,3 @@ await this.orderQueue.add('close-order', { orderId }, {
 - NestJS 生产场景面试题集：<https://fridolph.github.io/FE-prepare-interview/面试官问/18nestjs/intro.html>
 - NestJS 注册系统高频考点：<https://juejin.cn/post/7599911091086589952>
 - NestJS 性能对比（2026-07）：<https://devanddeliver.com/blog/development/nest-js-vs-express-vs-fastify-in-2026-a-practical-comparison>
-
