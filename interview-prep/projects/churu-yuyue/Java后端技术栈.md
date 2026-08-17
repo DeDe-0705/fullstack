@@ -165,9 +165,57 @@ Apollo 推送/长轮询通知服务
 - Redis 是**内存数据库/缓存**，不是消息队列（虽然支持 Pub/Sub，但项目里跨服务事件走 Kafka）
 - Feign 负责**声明式调用**，服务实例的发现靠 Eureka
 
+## 六、前端视角 Java 入门十问（2026-08-17 补充）
+
+> 定位：高级前端岗不会像后端岗一样深挖 JVM，考察的是"你知道这些组件在链路里干什么、为什么这么设计"。
+
+**1. Spring Boot 是什么？和 Spring 什么关系？**
+
+Spring Boot 是 Spring 生态的快速开发框架：自动配置（约定优于配置）+ 起步依赖 + 内嵌 Tomcat，一个 jar 就能跑。Spring 是基础框架，Spring Boot 是"开箱即用"的封装。
+
+**2. 一个 Java 后端请求从浏览器到 MySQL 的完整链路？**
+
+浏览器 → Nginx → 网关 → Controller（接收 HTTP 请求）→ Service（业务逻辑）→ DAO/MyBatis（数据库操作）→ MySQL → 结果逐层返回。项目里还有 Eureka 服务发现、Feign 服务调用、Redis 缓存、Kafka 异步事件、Apollo 配置。
+
+**3. Maven 是干什么的？**
+
+Java 构建工具：依赖管理、编译、测试、打包。关键命令 `mvn clean package` 出 jar；依赖冲突用 `dependencyManagement` 锁版本、`exclusions` 排除传递依赖。
+
+**4. MySQL 表怎么设计？为什么加索引？**
+
+核心表 + 业务字段 + create_time / update_time / is_deleted；删除走逻辑删除；高频筛选字段建索引；列表用分页（LIMIT）。索引本质是 B+Tree，加速查询但增加写入成本。
+
+**5. Redis 在项目里干什么？**
+
+缓存热点数据。查询先走 Redis，命中直接返回；未命中回源数据库并回填，带过期时间（Cache-Aside）。
+
+**6. 缓存穿透、击穿、雪崩？**
+
+穿透 = 查不存在的数据（空值缓存 / 布隆过滤器）；击穿 = 单个热点 key 过期瞬间（互斥锁 / 逻辑过期）；雪崩 = 大量 key 同时过期或 Redis 挂（过期加随机值 / 多级缓存兜底）。
+
+**7. 为什么用 Kafka 不用 HTTP？**
+
+跨服务异步事件，发送方不关心谁消费、是否在线，支持多消费者，解耦 + 削峰。Feign/HTTP 是同步请求-响应，适合需要立即拿结果的场景。
+
+**8. Kafka 消息会重复吗？怎么保证？**
+
+Kafka 是至少一次语义，可能重复投递；消费端做幂等（业务唯一键去重 / 状态校验），确保重复消费不产生副作用。
+
+**9. Eureka 和 Feign 的分工？**
+
+Eureka 管服务注册与发现，客户端缓存实例列表（AP 型，短暂不一致可接受）；Feign 按服务名发 HTTP 请求，内部做负载均衡。Eureka 挂了短时间还能按缓存调用。
+
+**10. Apollo 是干什么的？**
+
+分布式配置中心：多环境隔离、命名空间、动态刷新、审计。改配置不用重启，密钥需加密 + 权限隔离。
+
+**面试话术：** "我主要是前端视角参与 Java 全栈落地，对 Spring Boot、MySQL、Redis、Kafka、Eureka、Apollo 能讲清它们在链路里的角色和为什么这么设计；深入实现（如 JVM 调优、Kafka 分区原理）不是我的强项，需要和后端同学配合。"
+
+**简历提醒：** 不要写"熟悉 Java / Spring Boot"；写"了解 Java 后端技术栈，有全栈部署与联调经验"，把话题引向全链路意识而不是后端深度。
+
 ---
 
-## 六、参考来源（2026 面试趋势）
+## 七、参考来源（2026 面试趋势）
 
 - [语雀《2026 vs 2025 暑期前端面试趋势》](https://www.yuque.com/guluguluwater-qkq0t/qbbqks/bag3m3vduttasgyl?language=zh-cn)：只会前端不够，需要"泛全栈认知"
 - [语雀《字节前端实习现在到底在怎么面？》](https://www.yuque.com/guluguluwater-qkq0t/qbbqks/gloxwahrp7yd1net?language=en-us)：更关注"为什么这样设计"
