@@ -193,7 +193,63 @@ export class UserModule {}
 
 ---
 
-## 三、实战：你在理想汽车怎么用的
+## 三、没有上线经验的面试口径（2026-08-17 补充）
+
+### 3.1 定位：demo 经验怎么讲才不扣分
+
+只有 demo 经验不等于不能写简历。关键是不夸大、不心虚，把话说成：
+
+> "NestJS 我写过完整的全栈 demo，还没有生产级上线经验。我能讲清它的分层架构（Module / Controller / Service）、依赖注入和 AOP 组件（Guard / Pipe / Interceptor / ExceptionFilter），也实际处理过 DTO 校验、JWT 鉴权、统一响应这些常见问题。生产环境的高并发、监控告警、灰度发布我没有实战，但理解它们的解决思路。"
+
+这样回答的好处：**主动划定边界**，面试官反而不会往生产级深水区死磕；同时展示了原理理解。
+
+### 3.2 Demo 项目怎么介绍
+
+一个 NestJS demo 项目至少要有这些部分，才经得起追问：
+
+```
+src/
+├── modules/
+│   ├── auth/                  ← JWT 登录鉴权
+│   └── users/                 ← 用户 CRUD
+├── common/
+│   ├── guards/                ← AuthGuard
+│   ├── pipes/                 ← ValidationPipe
+│   ├── interceptors/          ← 统一响应包装
+│   └── filters/               ← 统一异常处理
+└── main.ts                    ← 全局注册
+```
+
+**介绍框架：**
+- 项目：基于 NestJS + TypeORM + MySQL 的 demo
+- 我负责：模块划分、DTO 校验、JWT 鉴权、统一响应与异常
+- 为什么这样设计：分层解耦、横切关注点统一、Swagger 生成前端类型
+- 踩过的坑：CORS、参数校验、JWT 过期、数据库唯一约束
+
+### 3.3 NestJS 入门十问（demo 级别）
+
+1. **NestJS 是什么？和 Express 什么关系？** 基于 TypeScript 的企业级 Node 框架，底层默认 Express，可切 Fastify；Nest 提供分层、DI、AOP，Express 只管路由和中间件。
+2. **Module / Controller / Service 分别干什么？** Module 组织代码边界；Controller 收请求、返响应，不含业务逻辑；Service 写业务逻辑，可被注入。
+3. **依赖注入（DI）是什么？** 通过 `@Injectable()` + providers 注册，IOC 容器自动实例化并注入依赖，测试时用 mock 替换；类比 Vue 的 provide/inject、React 的 Context。
+4. **Guard / Pipe / Interceptor / ExceptionFilter 各管什么？** Guard=能进来吗（鉴权）；Pipe=数据对吗（校验/转换）；Interceptor=前后加点东西（日志、响应包装）；ExceptionFilter=出错了统一处理。
+5. **一次请求的完整生命周期？** Middleware → Guard → Interceptor（前）→ Pipe → Controller → Service → Interceptor（后）→ ExceptionFilter（异常时）→ 返回。
+6. **DTO 为什么用 class 而不是 interface？** class 在运行时保留类型元数据，配合 `class-validator` 的装饰器做校验；interface 编译后消失。
+7. **JWT 鉴权怎么做？** 登录签发 token → Guard 里验证 `Authorization` → 解析 payload 挂到 request；过期返回 401，需要刷新再签新 token。
+8. **TypeORM/Prisma 和 SQL 的关系？** ORM 把表映射成实体类/模型，提供类型安全和 CRUD API，底层仍是 SQL；复杂查询可以直接写 SQL。
+9. **为什么选 NestJS 而不是 Express？** 团队协作下代码组织更清晰：分层 + DI + AOP 强约束，TS 一等支持；Express 自由但容易风格混乱。
+10. **没有生产经验怎么答？** 用 3.1 的诚实话术，不写"熟悉 NestJS 生产部署"，只写"了解 + 全栈 demo 经验"。
+
+### 3.4 Node.js 入门五问（demo 级别）
+
+1. **Node.js 为什么适合做后端？** 非阻塞 I/O + 事件驱动，单线程能扛高并发 I/O；但 CPU 密集任务会阻塞事件循环。
+2. **事件循环和浏览器有什么区别？** Node 分 6 个阶段（timers → pending → idle/prepare → poll → check → close），每阶段切换时清微任务；`process.nextTick` 优先级高于 `Promise.then`。
+3. **CommonJS 和 ESM 区别？** CJS 用 `require` / `module.exports`，同步加载；ESM 用 `import` / `export`，静态分析 + 异步加载，现代 Node 默认优先 ESM。
+4. **Stream 是什么？** 大文件流式读写，内存占用恒定，适合文件上传、日志处理；类型有 Readable / Writable / Duplex / Transform。
+5. **Node 单线程遇到 CPU 密集怎么办？** 拆成 worker_threads 或 cluster，把长任务移出主事件循环。
+
+---
+
+## 四、实战：你在理想汽车怎么用的
 
 ### 3.1 学习示例：出入预约业务 × NestJS 架构
 
@@ -227,7 +283,7 @@ src/
 
 ---
 
-## 四、面试速查
+## 五、面试速查
 
 | 问题 | 要点 |
 |------|------|
