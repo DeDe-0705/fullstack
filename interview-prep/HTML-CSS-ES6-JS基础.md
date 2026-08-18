@@ -332,10 +332,75 @@ const set = new Set([1, 2, 2, 3])  // Set(3) {1, 2, 3}
 // WeakMap — 键必须是对象，弱引用（不阻止 GC）
 const wm = new WeakMap()
 wm.set(obj, 'data')    // obj 被回收时，WeakMap 中的条目自动清除
-// 适合：DOM 元素关联数据、私有属性
 
-// WeakSet — 只存对象，弱引用
+// WeakSet — 只存对象，弱引用，适合做"对象标记"
 ```
+
+**对比速记：**
+
+| | Map / Set | WeakMap / WeakSet |
+|---|---|---|
+| 键/值类型 | 任意值 | 只能是对象（ES2023 起非注册 Symbol 也可作 WeakMap 键） |
+| 引用强度 | 强引用 | 弱引用，不阻止 GC |
+| 遍历 | 可遍历、有 size | 不能遍历、无 size、无 clear |
+| 用途 | 常规数据存储 | 把数据生命周期绑定到对象，防内存泄漏 |
+
+**WeakMap 三大用途：**
+
+1. **DOM 元素关联数据（防泄漏）**：元素从页面移除后，条目自动清理。
+
+```js
+// 反例：Map 强引用已移除的 DOM → 内存泄漏
+const map = new Map()
+function onClick(el) { map.set(el, { count: 1 }) }
+
+// 正例：键弱引用，DOM 移除后自动回收
+const states = new WeakMap()
+function onClick(el) {
+  states.set(el, { count: (states.get(el)?.count ?? 0) + 1 })
+}
+```
+
+2. **私有属性**：模块内的 WeakMap 对外不可见、不可枚举，实例被回收时数据一并回收。
+
+```js
+const _count = new WeakMap()
+class Counter {
+  constructor() { _count.set(this, 0) }
+  inc() { _count.set(this, _count.get(this) + 1) }
+}
+```
+
+3. **Vue3 响应式依赖表**：`targetMap = new WeakMap()`，键是响应式目标对象，值是「属性 → 依赖」的 Map。组件卸载、对象不再可达时，依赖表自动释放——这就是 Proxy 响应式不会累积内存的原因之一。
+
+**WeakSet 的核心用途：给对象打标记**（已点击、已处理、已初始化），标记不阻碍对象回收：
+
+```js
+const clicked = new WeakSet()
+button.addEventListener('click', () => {
+  if (clicked.has(button)) return  // 只处理第一次
+  clicked.add(button)
+})
+```
+
+**易错点（面试要主动说）：**
+- WeakMap 只有**键**是弱引用，**值仍是强引用**——别让 value 反向引用 key，否则键回收不了。
+- 值换成字符串/数字也一样：条目回收与否**只看键是否可达**，与值类型无关；原始值不会反向引用键，所以不存在"值把键钉住"的问题，只有值是对象且直接/间接引用键时，键才会回收不了。
+- 因为弱引用、条目可能随时被 GC 清掉，所以**不可遍历、无 size**，不能当常规缓存容器；想缓存且不丢数据，用 Map 或 LRU 自己管理。
+- "卸载"不等于"不可达"：DOM 从页面移除只是离开文档树，若 JS 变量仍持有引用，键依然存活、条目不会回收；且回收时机由 GC 决定，不是同步立刻删除。
+- 面试话术："WeakMap/WeakSet 用弱引用把数据生命周期绑定到对象上，对象没了数据自动没，核心价值是防内存泄漏；代价是只能以对象为键/成员、不可遍历。"
+
+**实战设计题：`WeakMap<DOM, 组件实例>`，而实例内部要引用自己的根 DOM，怎么设计？**
+
+问题根源：值（实例）是强引用，若实例内部 `this.el = dom`，那么实例只要还活着（被组件树/全局缓存持有），就会强引用键 → 键永远可达 → WeakMap 自动回收失效。
+
+解法按工程可靠性排序：
+
+1. **手动生命周期清理（最可靠）**：挂载时 `set`，卸载时 `delete`，不依赖 GC 时机；WeakMap 只当"漏删时的兜底"。
+2. **反向映射**：`WeakMap<实例, DOM>`，键换成实例（弱引用），实例内部通过 `map.get(this)` 拿 DOM，自己不持有 DOM。实例不可达时条目自动回收。
+3. **WeakRef 打破强引用**：实例里 `this.elRef = new WeakRef(dom)`，访问时 `this.elRef.deref()`。能打破"值引用键"的循环，但 `deref()` 可能返回 undefined、时机不可预测，工程上慎用。
+
+加分认知：**循环引用本身不可怕**——若实例和 DOM 整体都不可达，标记清除 GC 一样能回收整环；WeakMap 失效只发生在"实例被外部继续持有"时。Vue 的做法是把实例挂到 DOM 上（`el.__vueParentComponent`），方向是 DOM → 实例，且实例、vnode、DOM 生命周期同步，整体一起不可达，所以强引用也不泄漏。
 
 ### 3.5 Proxy（Vue3 响应式的基础）
 
@@ -453,7 +518,34 @@ bound2()  // [1, 10, 20] — this 还是 { x: 1 }，参数拼接
 
 **高频追问 4：传 null/undefined 给 call/apply/bind？** 非严格模式下 this 被替换为全局对象（window/globalThis）；**严格模式下保持 null/undefined**。
 
-**高频追问 5：new 一个 bind 出来的函数？** `new boundFn()` 等价于 `new targetFn()`：绑定的 this 被忽略（new 会创建新实例作为 this），但**预置参数仍会传入**构造函数。手写 bind 必须处理这一点。
+**高频追问 5：new 一个 bind 出来的函数？** `new boundFn()` 等价于 `new targetFn()`：绑定的 this 被忽略（new 会创建新实例作为 this），但**预置参数仍会传入**构造函数。
+
+这里还藏着一个原型链考点：
+
+- **原生 bind**：boundFn **没有自己的 `prototype` 属性**，`new boundFn()` 的构造行为直接透传给目标函数，实例原型指向 `targetFn.prototype`，所以 `new boundFn() instanceof targetFn === true`；`instanceof` 右侧写 boundFn 同样透传。代价是 boundFn 不能作为 `class extends` 的基类。
+- **手写 bind**：返回的是普通函数，自带默认 `prototype`。若不处理，`new boundFn()` 的实例原型指向 boundFn 自己的空 prototype，**连不上目标函数的原型**——`instanceof targetFn` 为 false，也访问不到目标原型上的方法。所以手写时**必须手动连接原型**：
+
+```js
+Function.prototype.myBind = function (thisArg, ...prefixArgs) {
+  const target = this
+  const bound = function (...restArgs) {
+    // new 调用时 this 是 bound 的实例 → 忽略 thisArg；普通调用才用绑定的 thisArg
+    return target.apply(this instanceof bound ? this : thisArg, [...prefixArgs, ...restArgs])
+  }
+  // 关键：把返回函数的原型连上目标函数的原型
+  bound.prototype = Object.create(target.prototype)
+  return bound
+}
+```
+
+两种连法对比：
+
+| 写法 | 实例原型 | 特点 |
+|------|---------|------|
+| `bound.prototype = target.prototype` | 直接是 `target.prototype`（最接近原生） | 两个 prototype 是同一对象，改动会污染目标原型 |
+| `bound.prototype = Object.create(target.prototype)` | 是 `bound.prototype`，再往上一层才是目标原型 | 隔离更安全，但原型链比原生多一层 |
+
+**追问扩展**：判断是否被 new 调用，`this instanceof bound` 是经典写法，但边界情况（如手动 `bound.call(某个实例)`）会误判；用 `new.target` 更可靠。注意普通函数被 `apply/call` 调用时 `new.target` 是 undefined，所以 `target.apply(this, ...)` 无法向目标函数透传 `new.target`；需要 `Reflect.construct(target, args, new.target)` 才能保留构造调用语义。
 
 **面试话术：** "bind 通过内部槽保存原函数、this 和预置参数并返回绑定函数；绑定函数的 this 永久固定，再 bind 只拼参数；箭头函数可 bind 但 this 无效；bound 函数可被 new，此时 this 被忽略而参数保留。"
 
