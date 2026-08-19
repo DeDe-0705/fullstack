@@ -16,7 +16,7 @@
 ## 二、框架原理
 
 - [Vue3 深度原理](./Vue3深度原理.md) — 响应式系统(Proxy)、虚拟DOM diff、Compiler优化、Composition API、生命周期、组件通信、内置组件原理、Vue 3.5/3.6 新特性
-- [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、并发模式、Virtual DOM reconciliation、与Vue对比
+- [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、Diff与render/commit阶段、并发模式、受控/非受控组件、合成事件、性能优化、React 19新特性(Actions/use/RSC)、状态管理(Redux/Zustand)、与Vue对比
 
 ## 三、工程与性能
 
@@ -35,6 +35,7 @@
 ## 五、项目与面试
 
 - [项目复盘与面试话术](./项目复盘与面试话术.md) — Li People/理想同事/组织信息管理/出入预约 四大项目STAR话术、系统设计题
+- [React 代码实践复盘](./React代码实践复盘.md) — 通过 client 代码学习 React 核心机制（Hooks 闭包陷阱、setState、useEffect、自定义 Hook、性能优化、React 19），记录踩坑与面试话术
 
 ---
 

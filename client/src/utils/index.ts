@@ -1,3 +1,5 @@
+import { createContext } from "react"
+
 export async function asyncPool<T>(
   limit: number,
   tasks: Array<() => Promise<T>>,
@@ -18,3 +20,10 @@ export async function asyncPool<T>(
 
   return Promise.all(results)
 }
+
+export interface UserConfig {
+  name: string
+  description: string
+}
+
+export const userConfigContext = createContext<UserConfig | null>  (null)

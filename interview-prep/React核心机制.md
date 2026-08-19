@@ -172,6 +172,43 @@ const countRef = useRef(0)
 countRef.current++ // 不触发渲染
 ```
 
+### 2.6 useReducer：复杂状态的 useState 替代品
+
+```js
+// 适合：多个状态相互关联、更新逻辑复杂、需要集中管理
+function reducer(state, action) {
+  switch (action.type) {
+    case 'increment':
+      return { count: state.count + 1 }
+    case 'decrement':
+      return { count: state.count - 1 }
+    case 'reset':
+      return { count: action.payload }
+    default:
+      return state
+  }
+}
+
+const [state, dispatch] = useReducer(reducer, { count: 0 })
+// dispatch({ type: 'increment' })
+```
+
+**与 Redux 的关系：** `useReducer` 是 Redux 的"组件内版本"——同样的 reducer + dispatch 模式，但状态局限在组件内部，不做全局共享。理解 useReducer 就理解了 Redux 的核心思想。
+
+### 2.7 useId 与 useImperativeHandle
+
+```js
+// useId：生成跨 SSR/CSR 一致的唯一 ID（用于表单 label、无障碍）
+const id = useId()
+<label htmlFor={id}>姓名</label>
+<input id={id} />
+
+// useImperativeHandle：限制 ref 暴露给父组件的方法
+useImperativeHandle(ref, () => ({
+  focus: () => inputRef.current.focus(),  // 只暴露 focus，不暴露整个 DOM
+}))
+```
+
 ---
 
 ## 三、Virtual DOM & Reconciliation（协调）
@@ -209,6 +246,50 @@ performUnitOfWork(fiber):
   Root → Child1(update) → Grandchild1-2(placement) → Child2(deletion) → null
   commit 阶段按此链表依次执行 DOM 操作
 ```
+
+### 3.3 render 阶段 vs commit 阶段（精确区分）
+
+```
+render 阶段（协调/Reconcile）：
+  → 可中断、可恢复
+  → 只"计算"哪些节点变了，产出 effect list
+  → 不修改真实 DOM
+  → 对应源码：beginWork / completeWork
+
+commit 阶段（提交）：
+  → 不可中断，必须同步执行完
+  → 把 effect list 应用到真实 DOM
+  → 对应源码：beforeMutation / mutation / layout
+```
+
+**面试加分点：** 常说"React 渲染可中断"其实指的是 render 阶段，commit 阶段是不可中断的。这两个阶段要分清楚。
+
+### 3.4 key 的作用与 index 的坑
+
+```
+key 的作用：
+  diff 时通过 key 判断子节点是"复用/移动/删除"还是"新建"
+  没有 key 时，React 按顺序比较，无法识别"移动"场景
+
+为什么不能用 index 当 key：
+  列表头部插入/删除/排序时，index 会整体错位
+  → 本应复用的节点被误判为新节点 → 状态错乱、输入内容串位
+  正确做法：用稳定且唯一的业务 id（如 item.id）
+```
+
+### 3.5 setState 的批处理机制
+
+```
+React 18 之前：
+  合成事件/生命周期内 → 批处理（多次 setState 合并为一次渲染）
+  setTimeout/原生事件 → 不批处理（每次 setState 都立即渲染）
+
+React 18 + createRoot（Automatic Batching）：
+  所有更新默认批处理，包括 setTimeout、Promise、原生事件
+  → 多次 setState 自动合并，性能更好
+```
+
+**函数式更新的意义：** `setCount(c => c + 1)` 拿到的是最新值，避免在连续更新时闭包读到旧值；`setCount(count + 1)` 读到的是"本次渲染"的 count，连续调用可能互相覆盖。
 
 ---
 
@@ -296,7 +377,264 @@ const LazyComponent = React.lazy(() => import('./Heavy'))
 
 ---
 
-## 六、React vs Vue：面试常问对比
+## 六、受控组件与非受控组件
+
+### 6.1 核心区别
+
+```
+受控组件（Controlled）：
+  表单值由 React state 控制，value + onChange 绑定
+  数据单一来源：React state，DOM 只是展示
+
+非受控组件（Uncontrolled）：
+  表单值由 DOM 自己管理，用 ref 在需要时读取
+  数据单一来源：DOM，React 不干预
+```
+
+### 6.2 代码对比
+
+```jsx
+// 受控：value + onChange，每次输入都走 state 更新
+function ControlledInput() {
+  const [value, setValue] = useState('')
+  return (
+    <input
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+    />
+  )
+}
+
+// 非受控：defaultValue 只设初值，用 ref 在提交时读取
+function UncontrolledInput() {
+  const inputRef = useRef(null)
+  const handleSubmit = () => {
+    console.log(inputRef.current.value)  // 提交时才读
+  }
+  return <input ref={inputRef} defaultValue="" />
+}
+```
+
+### 6.3 什么时候用哪个
+
+```
+用受控组件：
+  → 需要实时校验、格式化（手机号、信用卡）
+  → 多个输入联动（A 变化影响 B）
+  → 需要"数据单一来源"，便于测试和推理
+
+用非受控组件：
+  → 简单表单，只在提交时一次性取值
+  → 文件上传（<input type="file"> 无法受控，只能非受控）
+  → 高频输入的性能敏感场景（大量输入框，避免每次渲染）
+```
+
+### 6.4 对照 Vue 的 v-model
+
+Vue 的 `v-model` 本质是"受控思想"的语法糖——它自动帮你做了 `value` + `input` 事件的绑定，你不用手写 onChange。React 则把这个过程显式暴露出来，让你自己用 `value` + `onChange` 实现。理解了这个，你会发现两者底层是同一套"数据驱动视图"的逻辑，只是 React 更啰嗦但更透明。
+
+---
+
+## 七、合成事件系统
+
+### 7.1 什么是合成事件（SyntheticEvent）
+
+React 把原生浏览器事件包装成统一的 `SyntheticEvent` 对象，提供跨浏览器一致的 API。通过 `e.nativeEvent` 可以访问原始的原生事件。
+
+### 7.2 事件委托机制
+
+```
+React 17 之前：所有事件统一委托到 document
+React 17 之后：委托到 root 容器（createRoot 挂载的节点）
+
+好处：
+  1. 跨浏览器兼容：统一封装，抹平差异
+  2. 性能：统一监听，而不是每个元素都挂监听器，减少内存
+  3. 统一 API：所有事件走同一套合成事件规范
+```
+
+### 7.3 为什么 React 17 要从 document 改到 root 容器
+
+```
+场景：一个页面有多个 React 实例（微前端、嵌入其他框架）
+  document 委托 → 一个实例的事件会冒泡到另一个实例，互相干扰
+  root 容器委托 → 每个实例的事件只在自己的根容器内处理，互不干扰
+```
+
+### 7.4 与 Vue 的差异
+
+Vue 的事件是直接绑定到具体元素上的原生事件（编译时生成 `addEventListener`），React 则是合成事件 + 委托到根容器。所以 React 里 `e.stopPropagation()` 阻止的是合成事件的冒泡，某些特殊场景下和原生事件行为有细微差别。
+
+### 7.5 合成事件的批量更新关联
+
+React 在合成事件处理函数中会触发**自动批处理**（Automatic Batching）——一次事件里多次 `setState` 只触发一次渲染。这也是为什么"在 setTimeout/原生事件里 setState 的行为和合成事件里不同"（React 18 前）。
+
+---
+
+## 八、性能优化体系
+
+### 8.1 React.lazy + Suspense 代码分割
+
+```jsx
+// 路由级懒加载：按需加载 chunk，减小首屏体积
+const PostDetail = lazy(() => import('./PostDetail'))
+
+<Suspense fallback={<Loading />}>
+  <PostDetail />
+</Suspense>
+```
+
+核心价值：把不常用的页面/组件拆成独立 chunk，首屏只加载必要代码。
+
+### 8.2 key 的性能影响
+
+```
+正确用 key：稳定的唯一标识（id）
+  → diff 能精确判断"复用/移动/删除"，最小化 DOM 操作
+
+用 index 当 key 的坑：
+  列表头部插入/删除/排序时，index 全部错位
+  → 本应复用的节点被误判为"变了"，导致状态错乱（如输入框内容串位）
+```
+
+### 8.3 虚拟列表
+
+只渲染可视区域内的列表项，配合 `react-window` / `react-virtual` 等库。核心原理：计算总高度 + 滚动位置，只渲染可视窗口 + 缓冲区内的项，其余用空白占位。适用于万级以上的长列表。
+
+### 8.4 Profiler 定位瓶颈
+
+```jsx
+<Profiler id="List" onRender={(id, phase, actualDuration) => {
+  console.log(id, phase, actualDuration)  // 找出渲染耗时的组件
+}}>
+  <List />
+</Profiler>
+```
+
+配合 React DevTools 的 Profiler 面板，定位"为什么这个组件重渲染了"。
+
+### 8.5 状态设计优化（Colocation）
+
+```
+状态下沉：把状态放到真正使用它的最小层级，而不是都提到顶层
+  → 状态变化时，只有相关子树重渲染
+
+状态提升：多个兄弟组件共享状态时，才提升到共同父级
+
+核心原则：state 离使用它的组件越近越好（Colocation）
+```
+
+---
+
+## 九、React 19 新特性（2026 高频）
+
+### 9.1 Actions 体系（表单 + 异步状态管理）
+
+React 19 引入 Actions，把"表单提交 + 异步状态 + 乐观更新"统一成一套 API，取代大量 `useEffect` + `useState` 的样板代码。
+
+**useActionState**：管理表单提交的状态机
+
+```jsx
+import { useActionState } from 'react'
+
+async function submitAction(prevState, formData) {
+  const name = formData.get('name')
+  const result = await api.createUser(name)
+  return { ...prevState, users: [...prevState.users, result] }
+}
+
+function Form() {
+  const [state, formAction, isPending] = useActionState(submitAction, { users: [] })
+
+  return (
+    <form action={formAction}>
+      <input name="name" />
+      <button disabled={isPending}>
+        {isPending ? '提交中...' : '提交'}
+      </button>
+    </form>
+  )
+}
+```
+
+**useFormStatus**：读取父表单的提交状态
+
+```jsx
+function SubmitButton() {
+  const { pending } = useFormStatus()  // 必须在 <form> 内部使用
+  return <button disabled={pending}>{pending ? '提交中' : '提交'}</button>
+}
+```
+
+**useOptimistic**：乐观更新，先更新 UI 再等服务器确认
+
+```jsx
+const [optimisticMessages, addOptimistic] = useOptimistic(
+  messages,
+  (current, newMessage) => [...current, newMessage],
+)
+
+// 发消息时：先立即显示，再异步请求，失败则回滚
+addOptimistic({ id: tempId, text: input, pending: true })
+```
+
+### 9.2 use hook：在渲染中直接读取资源
+
+```jsx
+import { use } from 'react'
+
+// 读 Promise（配合 Suspense）
+const data = use(fetchDataPromise)
+
+// 读 Context（可替代 useContext，且能用条件语句）
+const theme = use(ThemeContext)
+```
+
+特点：`use` 可以在条件语句中使用（不像其他 Hook 有顺序限制），但必须在渲染期间调用。
+
+### 9.3 RSC（React Server Components）
+
+```
+Server Components（服务端组件）：
+  → 只在服务端渲染，不发 JS 到客户端
+  → 可以直接访问数据库、文件系统
+  → 不能用 Hooks、事件处理器
+  → 减小客户端 bundle，提升首屏
+
+Client Components（客户端组件）：
+  → 处理交互，用 'use client' 标记
+  → 可以用 Hooks、事件
+
+关键区分：组件的执行环境由"用途"决定，而不是由"位置"决定
+```
+
+### 9.4 ref 作为普通 prop（取代 forwardRef）
+
+```jsx
+// React 19 之前：需要 forwardRef
+const MyInput = forwardRef((props, ref) => <input ref={ref} {...props} />)
+
+// React 19：ref 直接作为 prop 传入
+function MyInput({ ref, ...props }) {
+  return <input ref={ref} {...props} />
+}
+```
+
+### 9.5 Activity（组件显示/隐藏保留状态）
+
+```jsx
+<Activity mode="hidden">
+  <ExpensiveChart />  {/* 隐藏时保留状态，类似 display:none 但更高效 */}
+</Activity>
+```
+
+### 9.6 useEffectEvent（实验性）
+
+见 Hooks 章节的闭包陷阱解法——让 Effect 读取最新 props/state 而不触发重新订阅。React 19.2 引入，仍是实验性 API。
+
+---
+
+## 十、React vs Vue：面试常问对比
 
 | 维度 | React | Vue |
 |------|-------|-----|
@@ -318,7 +656,7 @@ const LazyComponent = React.lazy(() => import('./Heavy'))
 
 ---
 
-## 七、高频面试题速答
+## 十一、高频面试题速答
 
 ### Q: Fiber 是什么，解决了什么问题？
 
@@ -343,9 +681,33 @@ useEffect 在浏览器绘制后异步执行，适合数据请求、订阅等不�
 - useMemo：计算开销大的派生数据。
 - useCallback：只在传给子组件且子组件用了 React.memo 时用。不配合 memo 的 useCallback 是自我安慰。
 
+### Q: 受控组件和非受控组件的区别？
+
+受控组件：表单值由 React state 控制（value + onChange），数据单一来源是 state，适合需要实时校验、联动、格式化的场景。非受控组件：表单值由 DOM 自己管理，用 ref 在需要时读取，适合简单表单、文件上传、高频输入性能敏感场景。
+
+### Q: React 的合成事件是什么？为什么要事件委托？
+
+合成事件是 React 包装原生事件的统一对象（SyntheticEvent），提供跨浏览器一致的 API。事件委托到 root 容器（React 17 前是 document），统一监听减少内存占用，并抹平浏览器差异。17 改到 root 是为了支持同一页面多个 React 实例（微前端）互不干扰。
+
+### Q: render 阶段和 commit 阶段有什么区别？
+
+render 阶段（协调）可中断、可恢复，只计算哪些节点变了，不修改真实 DOM；commit 阶段不可中断，把副作用同步应用到真实 DOM。常说"React 渲染可中断"指的是 render 阶段，commit 不可中断。
+
+### Q: 为什么 key 不能用 index？
+
+列表头部插入/删除/排序时 index 会整体错位，导致本应复用的节点被误判为新节点，造成状态错乱（如输入框内容串位）。key 应该用稳定且唯一的业务 id。
+
+### Q: React 19 的 Actions 解决了什么问题？
+
+Actions（useActionState / useFormStatus / useOptimistic）把表单提交、异步状态、乐观更新统一成一套 API，取代了大量 useEffect + useState 的样板代码。useActionState 管理提交状态机，useFormStatus 让深层子组件读取表单 pending 状态，useOptimistic 实现"先更新 UI 再等服务器确认"的乐观更新。
+
+### Q: Redux 和 Zustand 的本质区别？
+
+不是性能（两者都基于 useSyncExternalStore，都支持精准订阅），而是约束程度。Redux 强制所有状态变更走 action → reducer 的可追踪管道，换来大型团队协作的可预测性和调试能力；Zustand 放弃强制约束，换来极简 API 和更少代码。选型：中小应用默认 Zustand，大型团队/合规审计/复杂中间件选 Redux Toolkit。
+
 ---
 
-## 八、交互式 Demo
+## 十二、交互式 Demo
 
 - [React Hooks 执行流程可视化](./react-hooks-demo.html) — 看 useState/useEffect 在 React 生命周期中的执行时序
 - [React vs Vue Diff 对比演示](./diff-compare-demo.html) — 直观对比二者的 diff 策略差异

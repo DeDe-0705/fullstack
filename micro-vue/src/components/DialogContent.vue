@@ -2,8 +2,8 @@
   <div class="dialog-content">
     <p>弹窗内容（异步加载）</p>
     <p class="hint">
-      由 defineAsyncComponent + Suspense 加载：每次打开都会先显示 fallback，
-      约 0.8s 后渲染真实内容
+      由 defineAsyncComponent + Suspense 加载：每次打开都会先显示 fallback， 约
+      0.8s 后渲染真实内容
     </p>
     <button @click="emit('close')">关闭</button>
   </div>
