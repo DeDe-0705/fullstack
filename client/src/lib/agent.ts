@@ -182,7 +182,8 @@ export async function sendChatStream(
         }
         break
       case 'usage':
-        handlers.onUsage?.(payload as unknown as AgentUsage)
+        // server 端领域事件为 { usage: {...} } 嵌套结构
+        if (payload.usage) handlers.onUsage?.(payload.usage as AgentUsage)
         break
       case 'done':
         handlers.onDone?.(payload as unknown as AgentDoneResult)

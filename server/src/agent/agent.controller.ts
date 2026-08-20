@@ -13,6 +13,8 @@ interface AgentChatBody {
   userId?: string;
   conversationId?: string;
   message?: string;
+  /** 模型供应商，缺省由 AgentService 走默认值 */
+  provider?: string;
 }
 
 @Controller('api/agent')
@@ -28,6 +30,7 @@ export class AgentController {
       userId: body.userId,
       conversationId: body.conversationId,
       message,
+      provider: body.provider,
     });
   }
 
@@ -65,6 +68,7 @@ export class AgentController {
           userId: body.userId,
           conversationId: body.conversationId,
           message,
+          provider: body.provider,
         },
         abort.signal,
       )) {

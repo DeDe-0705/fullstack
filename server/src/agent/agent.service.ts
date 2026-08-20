@@ -1,23 +1,29 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConversationService } from '../conversation/conversation.service';
 import { ToolsService } from '../tools/tools.service';
-import type { Message } from '../database/entities/message.entity';
+import type {
+  Message,
+  MessageUsage,
+} from '../database/entities/message.entity';
 import {
-  DeepSeekChatMessage,
-  DeepSeekService,
-  DeepSeekTool,
-  DeepSeekToolCall,
-  DeepSeekUsage,
-} from './deepseek.service';
+  ChatMessage,
+  ChatToolCall,
+  MODEL_PROVIDERS,
+  ModelProvider,
+  ModelToolDefinition,
+} from './providers/model-provider';
 
 export interface AgentChatInput {
   userId: string;
   conversationId?: string;
   message: string;
+  /** 用户选择的供应商，缺省走默认（当前为 deepseek） */
+  provider?: string;
 }
 
 export interface AgentToolTrace {
@@ -30,7 +36,7 @@ export interface AgentDonePayload {
   conversationId: string;
   toolCalls: AgentToolTrace[];
   /** 整轮（可能含多轮工具调用）聚合后的 token 用量 */
-  usage: DeepSeekUsage | null;
+  usage: MessageUsage | null;
   /** 思考耗时：首次 reasoning 增量到首次 content 增量的毫秒数 */
   thinkingMs: number | null;
   /** 落库后的完整消息（含 status/tokenUsage/toolCalls 等元信息），前端直接写入缓存 */
@@ -42,7 +48,7 @@ export type AgentStreamEvent =
   | { kind: 'reasoning'; delta: string }
   | { kind: 'content'; delta: string }
   | { kind: 'tool'; name: string; arguments: string; result: string }
-  | ({ kind: 'usage' } & DeepSeekUsage)
+  | { kind: 'usage'; usage: MessageUsage }
   | ({ kind: 'done' } & AgentDonePayload);
 
 const SYSTEM_PROMPT =
@@ -54,21 +60,33 @@ export class AgentService {
   constructor(
     private readonly conversationService: ConversationService,
     private readonly toolsService: ToolsService,
-    private readonly deepSeekService: DeepSeekService,
+    // 供应商注册表：按 input.provider 取用，新增供应商只需在 AgentModule 注册
+    @Inject(MODEL_PROVIDERS)
+    private readonly providers: Map<string, ModelProvider>,
   ) {}
 
+  private resolveProvider(name?: string): ModelProvider {
+    const key = name ?? 'deepseek';
+    const provider = this.providers.get(key);
+    if (!provider) {
+      throw new BadRequestException(`不支持的模型供应商: ${key}`);
+    }
+    return provider;
+  }
+
   async chat(input: AgentChatInput) {
+    const provider = this.resolveProvider(input.provider);
     const ctx = await this.prepareChat(input);
     const { conversationId, messages, toolDefinitions } = ctx;
 
     const traces: AgentToolTrace[] = [];
     let reply = '';
     let reasoning = '';
-    let usage: DeepSeekUsage | null = null;
+    let usage: MessageUsage | null = null;
 
     // 工具调用循环：模型可能连续调用多个工具，最多 5 轮防止死循环
     for (let round = 0; round < 5; round += 1) {
-      const result = await this.deepSeekService.chat(messages, toolDefinitions);
+      const result = await provider.chat(messages, toolDefinitions);
       usage = this.mergeUsage(usage, result.usage);
       if (result.toolCalls.length === 0) {
         reply = result.content;
@@ -76,19 +94,19 @@ export class AgentService {
         break;
       }
 
-      // assistant 的 tool_calls 必须原样回传，DeepSeek 才能对上工具结果
-      messages.push({ role: 'assistant', content: null, tool_calls: result.toolCalls });
+      // assistant 的 toolCalls 必须原样回传，模型才能对上工具结果
+      messages.push({ role: 'assistant', content: null, toolCalls: result.toolCalls });
       for (const call of result.toolCalls) {
-        const args = this.parseToolArguments(call.function.arguments);
-        const toolResult = await this.toolsService.execute(call.function.name, args);
+        const args = this.parseToolArguments(call.arguments);
+        const toolResult = await this.toolsService.execute(call.name, args);
         traces.push({
-          name: call.function.name,
-          arguments: call.function.arguments,
+          name: call.name,
+          arguments: call.arguments,
           result: toolResult,
         });
         messages.push({
           role: 'tool',
-          tool_call_id: call.id,
+          toolCallId: call.id,
           content: toolResult,
         });
       }
@@ -103,8 +121,8 @@ export class AgentService {
       reasoning,
       status: 'completed',
       tokenUsage: usage,
-      provider: this.deepSeekService.provider,
-      model: this.deepSeekService.model,
+      provider: provider.provider,
+      model: provider.model,
       toolCalls: traces.length > 0 ? traces : null,
     });
 
@@ -116,13 +134,14 @@ export class AgentService {
     input: AgentChatInput,
     signal?: AbortSignal,
   ): AsyncGenerator<AgentStreamEvent> {
+    const provider = this.resolveProvider(input.provider);
     const ctx = await this.prepareChat(input);
     const { conversationId, messages, toolDefinitions } = ctx;
 
     const traces: AgentToolTrace[] = [];
     let reply = '';
     let reasoning = '';
-    let usage: DeepSeekUsage | null = null;
+    let usage: MessageUsage | null = null;
     let persisted = false;
     let failed = false;
     let thinkingStartedAt: number | null = null;
@@ -137,14 +156,14 @@ export class AgentService {
 
     try {
       for (let round = 0; round < 5; round += 1) {
-        let toolCalls: DeepSeekToolCall[] = [];
-        for await (const event of this.deepSeekService.streamChat(
+        let toolCalls: ChatToolCall[] = [];
+        for await (const event of provider.streamChat(
           messages,
           toolDefinitions,
           signal,
         )) {
           if (event.kind === 'usage') {
-            usage = this.mergeUsage(usage, event);
+            usage = this.mergeUsage(usage, event.usage);
             yield event;
           } else if (event.kind === 'reasoning') {
             thinkingStartedAt ??= Date.now();
@@ -165,25 +184,25 @@ export class AgentService {
         messages.push({
           role: 'assistant',
           content: reply || null,
-          tool_calls: toolCalls,
+          toolCalls,
         });
         for (const call of toolCalls) {
-          const args = this.parseToolArguments(call.function.arguments);
-          const toolResult = await this.toolsService.execute(call.function.name, args);
+          const args = this.parseToolArguments(call.arguments);
+          const toolResult = await this.toolsService.execute(call.name, args);
           traces.push({
-            name: call.function.name,
-            arguments: call.function.arguments,
+            name: call.name,
+            arguments: call.arguments,
             result: toolResult,
           });
           yield {
             kind: 'tool',
-            name: call.function.name,
-            arguments: call.function.arguments,
+            name: call.name,
+            arguments: call.arguments,
             result: toolResult,
           };
           messages.push({
             role: 'tool',
-            tool_call_id: call.id,
+            toolCallId: call.id,
             content: toolResult,
           });
         }
@@ -198,8 +217,8 @@ export class AgentService {
         status: 'completed',
         tokenUsage: usage,
         thinkingMs: calcThinkingMs(),
-        provider: this.deepSeekService.provider,
-        model: this.deepSeekService.model,
+        provider: provider.provider,
+        model: provider.model,
         toolCalls: traces.length > 0 ? traces : null,
       });
       persisted = true;
@@ -226,8 +245,8 @@ export class AgentService {
           status: failed ? 'error' : 'aborted',
           tokenUsage: usage,
           thinkingMs: calcThinkingMs(),
-          provider: this.deepSeekService.provider,
-          model: this.deepSeekService.model,
+          provider: provider.provider,
+          model: provider.model,
           toolCalls: traces.length > 0 ? traces : null,
         });
       }
@@ -260,7 +279,7 @@ export class AgentService {
       20,
       0,
     );
-    const messages: DeepSeekChatMessage[] = [
+    const messages: ChatMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       // 历史只持久化 user/assistant，tool/system 不会出现在这里
       ...history
@@ -271,14 +290,14 @@ export class AgentService {
         })),
     ];
 
-    const toolDefinitions: DeepSeekTool[] = this.toolsService.list().map((tool) => ({
-      type: 'function',
-      function: {
+    // 领域格式的工具定义，wire 格式转换由各供应商 service 内部完成
+    const toolDefinitions: ModelToolDefinition[] = this.toolsService
+      .list()
+      .map((tool) => ({
         name: tool.name,
         description: tool.description,
         parameters: this.toolsService.toJsonSchema(tool),
-      },
-    }));
+      }));
 
     return { conversationId, messages, toolDefinitions };
   }
@@ -294,9 +313,9 @@ export class AgentService {
 
   // 工具循环可能多次请求模型，用量按字段累加，方便整体展示/统计
   private mergeUsage(
-    target: DeepSeekUsage | null,
-    next: DeepSeekUsage | null,
-  ): DeepSeekUsage | null {
+    target: MessageUsage | null,
+    next: MessageUsage | null,
+  ): MessageUsage | null {
     if (!next) return target;
     return {
       completion_tokens: (target?.completion_tokens ?? 0) + next.completion_tokens,

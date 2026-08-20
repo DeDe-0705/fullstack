@@ -160,35 +160,65 @@ export class TenantService {
 
 ### 2.5 生命周期钩子与启动流程
 
+NestJS 生命周期钩子分**启动**和**关闭**两个阶段，共 5 个接口（含 4 个可注入 provider 的钩子 + 应用级钩子）：
+
+| 阶段 | 钩子 | 触发时机 |
+| --- | --- | --- |
+| 启动 | `OnModuleInit` | 模块依赖解析完成后，按模块导入顺序（被依赖的模块先） |
+| 启动 | `OnApplicationBootstrap` | 所有模块 `onModuleInit` 完成后、监听端口前 |
+| 关闭 | `OnModuleDestroy` | 收到终止信号（SIGTERM/SIGINT）后 |
+| 关闭 | `BeforeApplicationShutdown` | 所有 `onModuleDestroy` 完成后 |
+| 关闭 | `OnApplicationShutdown` | 最后，连接关闭后 |
+
+**完整顺序（官方文档）：**
+
+- 启动：`onModuleInit` → `onApplicationBootstrap`
+- 关闭：`onModuleDestroy` → `beforeApplicationShutdown` → `onApplicationShutdown`
+
 ```ts
 @Injectable()
-export class CacheService implements OnModuleInit, OnModuleDestroy {
-  async onModuleInit() {
-    // 模块初始化完成：连接 Redis、预热缓存
-  }
-  async onModuleDestroy() {
-    // 模块销毁：关闭连接
-  }
+export class CacheService
+  implements OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
+{
+  async onModuleInit() {}            // 连接 Redis、预热缓存
+  async onModuleDestroy() {}         // 关连接
+  async beforeApplicationShutdown(signal?: string) {} // 关连接前收尾
 }
 
 // AppModule 层面
-export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown {
-  onApplicationBootstrap() {} // 应用启动完成
-  onApplicationShutdown() {}  // 应用关闭（需 app.enableShutdownHooks()）
+export class AppModule
+  implements OnApplicationBootstrap, OnApplicationShutdown
+{
+  onApplicationBootstrap() {}          // 应用启动完成
+  onApplicationShutdown(signal?: string) {} // 应用关闭
 }
 ```
 
+**触发条件（易错点）：**
+
+- `onModuleInit` / `onApplicationBootstrap` 仅在显式调用 `app.init()` 或 `app.listen()` 时触发；只 `NestFactory.create()` 不 listen 不会触发。
+- 三个关闭钩子需要 `app.enableShutdownHooks()` 监听信号（`app.listen()` 通常会自动启用），或显式 `app.close()` 触发。
+- 关闭钩子方法接收 `signal` 参数（如 `'SIGTERM'`），可据此区分退出原因。
+
+**模块初始化顺序（高频追问）：**
+
+1. `onModuleInit` 按**模块导入拓扑序**执行：被依赖的模块先，父模块后。
+2. 同一模块内部：providers（Controller/Service）的 `onModuleInit` 先于 Module 类自身的 `onModuleInit`。
+3. **坑：同一模块内多个 provider 之间的依赖顺序不被保证**（NestJS 官方确认，生命周期钩子是「模块级」触发，不感知 provider 依赖）。若 A 的 `onModuleInit` 依赖 B 已初始化完成，需把 A、B 拆到不同模块，靠模块导入顺序保证。
+
 **启动流程（NestFactory.create 做了什么）：**
 
-1. 创建容器，扫描 `AppModule` 及其 imports，构建**模块依赖图**；
-2. 解析 providers 的依赖并实例化（默认单例懒加载？**注意：默认是应用启动时立即实例化**，除非配置 lazy）；
-3. 执行生命周期钩子（onModuleInit → onApplicationBootstrap）；
-4. 创建 HTTP 适配器并监听端口（`app.listen(3000)`）。
+1. 扫描 `AppModule` 及 imports，构建**模块依赖图**；
+2. 实例化 providers（默认启动时立即实例化，非懒加载）；
+3. 执行 `onModuleInit`（按模块拓扑序）；
+4. 执行 `onApplicationBootstrap`；
+5. 创建 HTTP 适配器并监听端口（`app.listen(3000)`）。
 
-追问：
+**优雅退出怎么做？**
 
-- **优雅退出怎么做？** `app.enableShutdownHooks()` + `OnApplicationShutdown`，Kubernetes 发 SIGTERM 时先停流量、再关连接池、最后退出。
-- **懒加载模块？** Nest 提供 `LazyModuleLoader`，启动时按需加载，减少冷启动时间。
+`app.enableShutdownHooks()` + 在 `beforeApplicationShutdown` / `onApplicationShutdown` 里关连接池。Kubernetes 滚动更新发 SIGTERM 时：先摘流量 → 收到 SIGTERM → `onModuleDestroy` → `beforeApplicationShutdown` → `onApplicationShutdown` → 进程退出。注意 K8s `terminationGracePeriodSeconds` 要给足清理时间，否则超时被 SIGKILL 强杀。
+
+**懒加载模块？** Nest 提供 `LazyModuleLoader`，启动时按需加载，减少冷启动时间。
 
 ### 2.6 装饰器速查表
 
@@ -1129,7 +1159,7 @@ await this.orderQueue.add('close-order', { orderId }, {
 | DI 怎么实现？ | 装饰器收集元数据 → 容器按依赖图实例化 → 构造函数注入 |
 | Provider 注册方式？ | useClass / useValue / useFactory / useExisting |
 | 三种作用域？ | DEFAULT 单例 / REQUEST 每请求 / TRANSIENT 每次注入 |
-| 生命周期钩子？ | onModuleInit、onApplicationBootstrap、onModuleDestroy、onApplicationShutdown |
+| 生命周期钩子？ | 启动：onModuleInit → onApplicationBootstrap；关闭：onModuleDestroy → beforeApplicationShutdown → onApplicationShutdown |
 | 请求生命周期顺序？ | Middleware → Guard → Interceptor(前) → Pipe → Controller → Service → Interceptor(后) → Filter |
 | Guard 和 Middleware 区别？ | Guard 在后、能拿元数据、管授权；Middleware 在前、操作原生 req/res |
 | Pipe 作用？ | 校验 + 转换，进入 Controller 前执行 |

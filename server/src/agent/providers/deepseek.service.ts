@@ -7,35 +7,28 @@ import {
   DeepSeekReasoningEffort,
   DeepSeekTool,
   DeepSeekToolCall,
-  DeepSeekUsage,
 } from './deepseek.types';
+import {
+  ChatMessage,
+  ChatToolCall,
+  ModelChatResult,
+  ModelProvider,
+  ModelStreamEvent,
+  ModelToolDefinition,
+} from './model-provider';
 
-// 对外继续暴露类型，调用方不用关心定义在哪个文件
-export type {
-  DeepSeekChatMessage,
-  DeepSeekReasoningEffort,
-  DeepSeekTool,
-  DeepSeekToolCall,
-  DeepSeekUsage,
-} from './deepseek.types';
-
-export interface DeepSeekChatResult {
-  content: string;
-  reasoning: string;
-  toolCalls: DeepSeekToolCall[];
-  /** 非流式返回的整轮用量；为后续前端展示/用量统计预留 */
-  usage: DeepSeekUsage | null;
+// wire → 领域：DeepSeek 的 tool_calls[].function 嵌套结构拍平
+function toDomainToolCall(call: DeepSeekToolCall): ChatToolCall {
+  return {
+    id: call.id,
+    name: call.function.name,
+    arguments: call.function.arguments,
+  };
 }
 
-export type DeepSeekStreamEvent =
-  | { kind: 'reasoning'; delta: string }
-  | { kind: 'content'; delta: string }
-  | { kind: 'tool_calls'; toolCalls: DeepSeekToolCall[] }
-  | ({ kind: 'usage' } & DeepSeekUsage);
-
 @Injectable()
-export class DeepSeekService {
-  // 供应商标识，落库到消息元信息，多模型切换后按 provider 聚合/筛选
+export class DeepSeekService implements ModelProvider {
+  // 供应商标识：注册表的 key，也落库到消息元信息，多模型切换后按 provider 聚合/筛选
   get provider(): string {
     return 'deepseek';
   }
@@ -47,13 +40,15 @@ export class DeepSeekService {
 
   // DeepSeek 提供 OpenAI 兼容接口，用原生 fetch 直接调，依赖最少、原理最透明
   async chat(
-    messages: DeepSeekChatMessage[],
-    tools: DeepSeekTool[],
-  ): Promise<DeepSeekChatResult> {
+    messages: ChatMessage[],
+    tools: ModelToolDefinition[],
+  ): Promise<ModelChatResult> {
     const res = await fetch(this.endpoint(), {
       method: 'POST',
       headers: this.headers(),
-      body: JSON.stringify(this.buildBody(messages, tools, false)),
+      body: JSON.stringify(
+        this.buildBody(this.toWireMessages(messages), this.toWireTools(tools), false),
+      ),
       signal: AbortSignal.timeout(60_000),
     });
 
@@ -69,21 +64,23 @@ export class DeepSeekService {
     return {
       content: message?.content ?? '',
       reasoning: message?.reasoning_content ?? '',
-      toolCalls: message?.tool_calls ?? [],
+      toolCalls: (message?.tool_calls ?? []).map(toDomainToolCall),
       usage: data.usage ?? null,
     };
   }
 
-  // 流式对话：SSE 逐块解析后转成事件，调用方（AgentService）负责把工具调用回合拼回完整对话
+  // 流式对话：SSE 逐块解析后转成领域事件，调用方（AgentService）负责把工具调用回合拼回完整对话
   async *streamChat(
-    messages: DeepSeekChatMessage[],
-    tools: DeepSeekTool[],
+    messages: ChatMessage[],
+    tools: ModelToolDefinition[],
     signal?: AbortSignal,
-  ): AsyncGenerator<DeepSeekStreamEvent> {
+  ): AsyncGenerator<ModelStreamEvent> {
     const res = await fetch(this.endpoint(), {
       method: 'POST',
       headers: this.headers(),
-      body: JSON.stringify(this.buildBody(messages, tools, true)),
+      body: JSON.stringify(
+        this.buildBody(this.toWireMessages(messages), this.toWireTools(tools), true),
+      ),
       // 流式响应可能持续较久，120s 兜底；外部 signal（客户端断开）优先
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
@@ -127,9 +124,9 @@ export class DeepSeekService {
             // 个别非 JSON 的心跳/注释行直接跳过，不影响主流程
             continue;
           }
-          // include_usage 开启后，[DONE] 前的最后一块带完整用量，先透传给调用方
+          // include_usage 开启后，[DONE] 前的最后一块带完整用量，转成领域事件透出
           if (chunk.usage) {
-            yield { kind: 'usage', ...chunk.usage };
+            yield { kind: 'usage', usage: chunk.usage };
           }
           const delta = chunk.choices?.[0]?.delta;
           if (!delta) continue;
@@ -160,8 +157,55 @@ export class DeepSeekService {
     }
 
     if (toolCallByIndex.size > 0) {
-      yield { kind: 'tool_calls', toolCalls: [...toolCallByIndex.values()] };
+      yield {
+        kind: 'tool_calls',
+        toolCalls: [...toolCallByIndex.values()].map(toDomainToolCall),
+      };
     }
+  }
+
+  // ---- wire 格式映射：DeepSeek API 的 snake_case 只允许存在于本文件 ----
+
+  private toWireMessages(messages: ChatMessage[]): DeepSeekChatMessage[] {
+    return messages.map((message): DeepSeekChatMessage => {
+      switch (message.role) {
+        case 'system':
+          return { role: 'system', content: message.content ?? '' };
+        case 'user':
+          return { role: 'user', content: message.content ?? '' };
+        case 'assistant':
+          return {
+            role: 'assistant',
+            content: message.content,
+            ...(message.toolCalls?.length
+              ? {
+                  tool_calls: message.toolCalls.map((call) => ({
+                    id: call.id,
+                    type: 'function' as const,
+                    function: { name: call.name, arguments: call.arguments },
+                  })),
+                }
+              : {}),
+          };
+        case 'tool':
+          return {
+            role: 'tool',
+            content: message.content ?? '',
+            tool_call_id: message.toolCallId ?? '',
+          };
+      }
+    });
+  }
+
+  private toWireTools(tools: ModelToolDefinition[]): DeepSeekTool[] {
+    return tools.map((tool) => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    }));
   }
 
   private endpoint(): string {
