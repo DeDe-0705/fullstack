@@ -5,6 +5,8 @@ import { Conversation } from './entities/conversation.entity';
 import { Message } from './entities/message.entity';
 import { InitSchema1780000000000 } from './migrations/1780000000000-init-schema';
 import { AddReasoningToMessages1780000000100 } from './migrations/1780000000100-add-reasoning-to-messages';
+import { AddMessageStatusAndMeta1780000000200 } from './migrations/1780000000200-add-message-status-and-meta';
+import { AddProviderToMessages1780000000300 } from './migrations/1780000000300-add-provider-to-messages';
 
 try {
   process.loadEnvFile();
@@ -21,6 +23,11 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'agent_demo',
   entities: [User, Conversation, Message],
-  migrations: [InitSchema1780000000000, AddReasoningToMessages1780000000100],
+  migrations: [
+    InitSchema1780000000000,
+    AddReasoningToMessages1780000000100,
+    AddMessageStatusAndMeta1780000000200,
+    AddProviderToMessages1780000000300,
+  ],
   synchronize: false,
 });

@@ -75,14 +75,8 @@ export function AgentInput() {
           onContent: (delta) => appendContent(delta),
           onTool: (trace) => addTool(trace),
           onDone: (result) => {
-            finishTurn(
-              {
-                messageId: result.assistantMessage.id,
-                thinkingMs: result.thinkingMs,
-                usage: result.usage,
-              },
-              result.toolCalls,
-            );
+            // 元信息（用量/耗时/工具轨迹）已随 assistantMessage 落库并写进缓存，流式状态清空即可
+            finishTurn();
             // 服务端已把消息落库，直接把真实消息写进缓存，避免刷新历史时闪没或重复
             queryClient.setQueryData<Paginated<AgentMessage>>(
               ["agent", "messages", result.conversationId],

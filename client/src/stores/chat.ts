@@ -1,43 +1,36 @@
-import type { AgentToolTrace, AgentUsage } from '@/lib/agent'
+import type { AgentToolTrace } from '@/lib/agent'
 import { create } from 'zustand'
 
-export interface AgentTurnMeta {
-  messageId: string;
-  thinkingMs: number | null;
-  usage: AgentUsage | null;
-}
-
 interface ChatState {
-  streamingConversationId: string | undefined,
+  // 流式内容归属的会话：切走后回来仍能看到实时的流
+  streamingConversationId: string | undefined
   streaming: boolean
   streamReasoning: string
   streamContent: string
   streamTools: AgentToolTrace[]
-  lastMeta: AgentTurnMeta | null
-  lastToolCalls: AgentToolTrace[]
 }
 
 interface ChatAction {
-  setStreamingConversationId: (id?: string) => void;
+  setStreamingConversationId: (id?: string) => void
   startStreaming: () => void
   stopStreaming: () => void
   appendReasoning: (delta: string) => void
   appendContent: (delta: string) => void
   addTool: (trace: AgentToolTrace) => void
-  finishTurn: (meta: AgentTurnMeta | null, toolCalls: AgentToolTrace[]) => void
+  finishTurn: () => void
   resetState: () => void
 }
 
+// 流式中的临时状态。轮次元信息（用量/耗时/工具轨迹）已随消息落库，
+// 历史展示直接从 message 上读，store 不再保留 lastMeta/lastToolCalls
 export const useChatStore = create<ChatState & ChatAction>(
-  (set, get) => {
+  (set) => {
     return {
       streamingConversationId: undefined,
       streaming: false,
       streamReasoning: '',
       streamContent: '',
       streamTools: [],
-      lastMeta: null,
-      lastToolCalls: [],
       setStreamingConversationId: (id?: string) => set({ streamingConversationId: id }),
       startStreaming: () => {
         set({
@@ -45,37 +38,28 @@ export const useChatStore = create<ChatState & ChatAction>(
           streamReasoning: '',
           streamContent: '',
           streamTools: [],
-          lastMeta: null,
-          lastToolCalls: []
         })
       },
       stopStreaming: () => set({ streaming: false }),
       appendReasoning: (delta) => set((s) => ({ streamReasoning: s.streamReasoning + delta })),
       appendContent: (delta) => set((s) => ({ streamContent: s.streamContent + delta })),
-      addTool: (trace: AgentToolTrace) => {
+      addTool: (trace: AgentToolTrace) =>
+        set((s) => ({ streamTools: [...s.streamTools, trace] })),
+      finishTurn: () => {
         set({
-          streamTools: get().streamTools.concat(trace)
-        })
-      },
-      finishTurn: (meta: AgentTurnMeta | null, toolCalls: AgentToolTrace[]) => {
-        set({
-          lastMeta: meta,
-          lastToolCalls: toolCalls,
-          streamContent: '',
           streamReasoning: '',
+          streamContent: '',
           streamTools: [],
-          streamingConversationId: undefined
+          streamingConversationId: undefined,
         })
       },
       resetState: () => {
         set({
-          lastMeta: null,
-          lastToolCalls: [],
-          streamContent: '',
           streamReasoning: '',
-          streamTools: []
+          streamContent: '',
+          streamTools: [],
         })
-      }
+      },
     }
   }
 )

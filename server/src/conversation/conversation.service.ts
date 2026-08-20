@@ -3,11 +3,31 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../database/entities/user.entity';
 import { Conversation } from '../database/entities/conversation.entity';
-import { Message, MessageRole } from '../database/entities/message.entity';
+import {
+  Message,
+  MessageRole,
+  MessageStatus,
+  MessageToolCall,
+  MessageUsage,
+} from '../database/entities/message.entity';
 
 export interface Page<T> {
   items: T[];
   total: number;
+}
+
+// 落库消息的可选元信息：状态、token 用量、思考耗时、模型、工具轨迹（仅 assistant 消息使用）
+export interface AddMessageInput {
+  conversationId: string;
+  role: MessageRole;
+  content: string;
+  reasoning?: string | null;
+  status?: MessageStatus;
+  tokenUsage?: MessageUsage | null;
+  thinkingMs?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  toolCalls?: MessageToolCall[] | null;
 }
 
 @Injectable()
@@ -67,18 +87,24 @@ export class ConversationService {
     return { items: rows.reverse(), total };
   }
 
-  async addMessage(
-    conversationId: string,
-    role: MessageRole,
-    content: string,
-    reasoning: string | null = null,
-  ): Promise<Message> {
+  async addMessage(input: AddMessageInput): Promise<Message> {
     const message = await this.messageRepo.save(
-      this.messageRepo.create({ conversationId, role, content, reasoning }),
+      this.messageRepo.create({
+        conversationId: input.conversationId,
+        role: input.role,
+        content: input.content,
+        reasoning: input.reasoning ?? null,
+        status: input.status ?? 'completed',
+        tokenUsage: input.tokenUsage ?? null,
+        thinkingMs: input.thinkingMs ?? null,
+        provider: input.provider ?? null,
+        model: input.model ?? null,
+        toolCalls: input.toolCalls ?? null,
+      }),
     );
     // 会话列表按 updated_at 倒序，新消息刷新会话的更新时间
     await this.conversationRepo.update(
-      { id: conversationId },
+      { id: input.conversationId },
       { updatedAt: new Date() },
     );
     return message;

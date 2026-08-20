@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConversationService } from '../conversation/conversation.service';
 import { ToolsService } from '../tools/tools.service';
+import type { Message } from '../database/entities/message.entity';
 import {
   DeepSeekChatMessage,
   DeepSeekService,
@@ -32,14 +33,8 @@ export interface AgentDonePayload {
   usage: DeepSeekUsage | null;
   /** 思考耗时：首次 reasoning 增量到首次 content 增量的毫秒数 */
   thinkingMs: number | null;
-  assistantMessage: {
-    id: string;
-    conversationId: string;
-    role: 'assistant';
-    content: string;
-    reasoning: string | null;
-    createdAt: Date;
-  };
+  /** 落库后的完整消息（含 status/tokenUsage/toolCalls 等元信息），前端直接写入缓存 */
+  assistantMessage: Omit<Message, 'conversation'>;
 }
 
 export type AgentStreamEvent =
@@ -100,7 +95,18 @@ export class AgentService {
     }
 
     if (!reply) reply = '（工具调用轮次已达上限，未得到最终回复）';
-    await this.conversationService.addMessage(conversationId, 'assistant', reply, reasoning);
+    // 非流式无法区分思考与生成阶段，thinkingMs 不落库（默认 null）
+    await this.conversationService.addMessage({
+      conversationId,
+      role: 'assistant',
+      content: reply,
+      reasoning,
+      status: 'completed',
+      tokenUsage: usage,
+      provider: this.deepSeekService.provider,
+      model: this.deepSeekService.model,
+      toolCalls: traces.length > 0 ? traces : null,
+    });
 
     return { reply, conversationId, toolCalls: traces, usage };
   }
@@ -118,8 +124,13 @@ export class AgentService {
     let reasoning = '';
     let usage: DeepSeekUsage | null = null;
     let persisted = false;
+    let failed = false;
     let thinkingStartedAt: number | null = null;
     let contentStartedAt: number | null = null;
+    const calcThinkingMs = () =>
+      thinkingStartedAt && contentStartedAt
+        ? contentStartedAt - thinkingStartedAt
+        : null;
 
     // 先告知前端会话 ID：首次提问会自动建会话，前端停止生成时也能按 ID 刷新历史
     yield { kind: 'ready', conversationId };
@@ -179,41 +190,46 @@ export class AgentService {
       }
 
       if (!reply) reply = '（工具调用轮次已达上限，未得到最终回复）';
-      const saved = await this.conversationService.addMessage(
+      const saved = await this.conversationService.addMessage({
         conversationId,
-        'assistant',
-        reply,
+        role: 'assistant',
+        content: reply,
         reasoning,
-      );
+        status: 'completed',
+        tokenUsage: usage,
+        thinkingMs: calcThinkingMs(),
+        provider: this.deepSeekService.provider,
+        model: this.deepSeekService.model,
+        toolCalls: traces.length > 0 ? traces : null,
+      });
       persisted = true;
-      const thinkingMs =
-        thinkingStartedAt && contentStartedAt
-          ? contentStartedAt - thinkingStartedAt
-          : null;
       yield {
         kind: 'done',
         conversationId,
         toolCalls: traces,
         usage,
-        thinkingMs,
-        assistantMessage: {
-          id: saved.id,
-          conversationId: saved.conversationId,
-          role: 'assistant',
-          content: saved.content,
-          reasoning: saved.reasoning,
-          createdAt: saved.createdAt,
-        },
+        thinkingMs: calcThinkingMs(),
+        assistantMessage: saved,
       };
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
-      // 客户端中途断开/出错时也把已生成内容落库，避免对话上下文丢失
+      // 客户端中途断开/出错时也把已生成内容落库，避免对话上下文丢失；
+      // status 区分用户中断（aborted）与上游异常（error）
       if (!persisted && reply.trim()) {
-        await this.conversationService.addMessage(
+        await this.conversationService.addMessage({
           conversationId,
-          'assistant',
-          reply,
+          role: 'assistant',
+          content: reply,
           reasoning,
-        );
+          status: failed ? 'error' : 'aborted',
+          tokenUsage: usage,
+          thinkingMs: calcThinkingMs(),
+          provider: this.deepSeekService.provider,
+          model: this.deepSeekService.model,
+          toolCalls: traces.length > 0 ? traces : null,
+        });
       }
     }
   }
@@ -233,7 +249,11 @@ export class AgentService {
       conversationId = created.id;
     }
 
-    await this.conversationService.addMessage(conversationId, 'user', input.message);
+    await this.conversationService.addMessage({
+      conversationId,
+      role: 'user',
+      content: input.message,
+    });
 
     const { items: history } = await this.conversationService.getHistory(
       conversationId,

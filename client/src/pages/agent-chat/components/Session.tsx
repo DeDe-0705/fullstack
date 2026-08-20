@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useConversationId } from "../hooks/useConversationId";
 import { LogoutOutlined, PlusOutlined } from "@ant-design/icons";
 import { Flex, Typography, Button, List, Empty } from "antd";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { AgentConversation } from "@/lib/agent";
 import { useChatStore } from "@/stores/chat";
 
@@ -53,7 +53,7 @@ export function AgentSession() {
   const streaming = useChatStore((s) => s.streaming);
 
   const { userId, userName, clearSession } = useAgentStore();
-  const [conversationId, setConversationId] = useConversationId();
+  const [, setConversationId] = useConversationId();
   const resetState = useChatStore((s) => s.resetState);
 
   const conversationsQuery = useQuery(userConversationsOptions(userId));

@@ -35,6 +35,16 @@ export type DeepSeekStreamEvent =
 
 @Injectable()
 export class DeepSeekService {
+  // 供应商标识，落库到消息元信息，多模型切换后按 provider 聚合/筛选
+  get provider(): string {
+    return 'deepseek';
+  }
+
+  // 当前使用的模型名，落库到消息元信息里，便于换模型后回溯
+  get model(): string {
+    return process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+  }
+
   // DeepSeek 提供 OpenAI 兼容接口，用原生 fetch 直接调，依赖最少、原理最透明
   async chat(
     messages: DeepSeekChatMessage[],
@@ -186,7 +196,7 @@ export class DeepSeekService {
         ? rawEffort
         : 'high';
     return {
-      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
+      model: this.model,
       messages,
       tools,
       tool_choice: 'auto',

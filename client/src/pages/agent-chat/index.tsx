@@ -6,11 +6,12 @@ import { useAgentStore } from "@/stores/agent";
 import { useConversationId } from "./hooks/useConversationId";
 import { LoginComponent } from "./components/Login";
 import { MessageComponent } from "./components/Messsage";
+import { WelcomeComponent } from "./components/Welcome";
 
 export default function AgentChat() {
   const [collapsed, setCollapsed] = useState(false);
   const { userId } = useAgentStore();
-  const [conversationId, setConversationId] = useConversationId();
+  const [conversationId] = useConversationId();
 
   if (!userId) return <LoginComponent />;
 
@@ -32,7 +33,7 @@ export default function AgentChat() {
             conversationId={conversationId}
           ></MessageComponent>
         ) : (
-          <div>需要会话id</div>
+          <WelcomeComponent />
         )}
         <AgentInput />
       </Layout.Content>

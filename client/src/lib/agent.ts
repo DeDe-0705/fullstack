@@ -17,12 +17,21 @@ export interface AgentConversation {
 
 export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'system'
 
+// completed 正常完成 / aborted 用户中断 / error 上游异常
+export type AgentMessageStatus = 'completed' | 'aborted' | 'error'
+
 export interface AgentMessage {
   id: string
   conversationId: string
   role: AgentMessageRole
   content: string
   reasoning?: string | null
+  status?: AgentMessageStatus
+  tokenUsage?: AgentUsage | null
+  thinkingMs?: number | null
+  provider?: string | null
+  model?: string | null
+  toolCalls?: AgentToolTrace[] | null
   createdAt: string
 }
 
@@ -32,7 +41,7 @@ export interface AgentToolTrace {
   result: string
 }
 
-// 与后端 DeepSeek response.usage 对齐，后续做用量展示/统计直接用
+// 供应商无关的统一用量结构（OpenAI 兼容），与 server 端 MessageUsage 对齐
 export interface AgentUsage {
   completion_tokens: number
   prompt_tokens: number

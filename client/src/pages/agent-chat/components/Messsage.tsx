@@ -1,8 +1,8 @@
-import { Flex, Space, Typography, Spin, Card, Collapse, List } from "antd";
+import { Flex, Typography, Spin, Card, Collapse, List } from "antd";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { useChatStore } from "@/stores/chat";
 import { messagesOptions, type AgentToolTrace } from "@/lib/agent";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -10,6 +10,12 @@ const ROLE_LABEL: Record<string, string> = {
   assistant: "助手",
   tool: "工具",
   system: "系统",
+};
+
+// 消息状态展示：aborted/error 在历史消息上给出明确标识
+const STATUS_LABEL: Record<string, { text: string; type: "warning" | "danger" }> = {
+  aborted: { text: "已停止生成", type: "warning" },
+  error: { text: "生成出错", type: "danger" },
 };
 
 // 工具调用轨迹的通用渲染：流式中和会话结束后复用
@@ -44,8 +50,6 @@ export function MessageComponent({ conversationId }: MessageComponentProps) {
     streamReasoning,
     streamContent,
     streamTools,
-    lastMeta,
-    lastToolCalls,
   } = useChatStore();
   const messagesQuery = useQuery(messagesOptions(conversationId));
 
@@ -114,27 +118,48 @@ export function MessageComponent({ conversationId }: MessageComponentProps) {
                   />
                 )}
                 <ChatMarkdown content={message.content} />
-                {lastMeta?.messageId === message.id &&
-                  (lastMeta.thinkingMs != null || lastMeta.usage) && (
-                    <Typography.Text
-                      type="secondary"
-                      style={{
-                        display: "block",
-                        fontSize: 12,
-                        marginTop: 8,
-                      }}
-                    >
-                      {lastMeta.thinkingMs != null &&
-                        `思考 ${(lastMeta.thinkingMs / 1000).toFixed(1)} 秒`}
-                      {lastMeta.thinkingMs != null && lastMeta.usage && " · "}
-                      {lastMeta.usage &&
-                        `使用 ${lastMeta.usage.total_tokens} tokens` +
-                          (lastMeta.usage.completion_tokens_details
-                            ?.reasoning_tokens
-                            ? `（推理 ${lastMeta.usage.completion_tokens_details.reasoning_tokens}）`
-                            : "")}
-                    </Typography.Text>
-                  )}
+                {message.toolCalls && message.toolCalls.length > 0 && (
+                  <Collapse
+                    size="small"
+                    ghost
+                    items={[
+                      {
+                        key: "tool-calls",
+                        label: `工具调用（${message.toolCalls.length}）`,
+                        children: <ToolTraceList traces={message.toolCalls} />,
+                      },
+                    ]}
+                  />
+                )}
+                {message.status && message.status !== "completed" && (
+                  <Typography.Text
+                    type={STATUS_LABEL[message.status].type}
+                    style={{ display: "block", fontSize: 12, marginTop: 8 }}
+                  >
+                    {STATUS_LABEL[message.status].text}
+                  </Typography.Text>
+                )}
+                {(message.thinkingMs != null || message.tokenUsage) && (
+                  <Typography.Text
+                    type="secondary"
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      marginTop: 8,
+                    }}
+                  >
+                    {message.thinkingMs != null &&
+                      `思考 ${(message.thinkingMs / 1000).toFixed(1)} 秒`}
+                    {message.thinkingMs != null && message.tokenUsage && " · "}
+                    {message.tokenUsage &&
+                      `使用 ${message.tokenUsage.total_tokens} tokens` +
+                        (message.tokenUsage.completion_tokens_details
+                          ?.reasoning_tokens
+                          ? `（推理 ${message.tokenUsage.completion_tokens_details.reasoning_tokens}）`
+                          : "")}
+                    {message.model && ` · ${message.model}`}
+                  </Typography.Text>
+                )}
               </>
             ) : (
               <Typography.Text style={{ whiteSpace: "pre-wrap" }}>
@@ -211,18 +236,6 @@ export function MessageComponent({ conversationId }: MessageComponentProps) {
         </Flex>
       )}
 
-      {lastToolCalls.length > 0 && (
-        <Collapse
-          size="small"
-          items={[
-            {
-              key: "tool-calls",
-              label: "本轮工具调用轨迹",
-              children: <ToolTraceList traces={lastToolCalls} />,
-            },
-          ]}
-        />
-      )}
       <div ref={bottomRef} />
     </Flex>
   );

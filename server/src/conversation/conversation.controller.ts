@@ -89,10 +89,10 @@ export class ConversationController {
       throw new BadRequestException(`role 必须是 ${MESSAGE_ROLES.join('/')}`);
     }
     if (!body.content?.trim()) throw new BadRequestException('content 必填');
-    return this.conversationService.addMessage(
-      id,
-      body.role as MessageRole,
-      body.content,
-    );
+    return this.conversationService.addMessage({
+      conversationId: id,
+      role: body.role as MessageRole,
+      content: body.content,
+    });
   }
 }
