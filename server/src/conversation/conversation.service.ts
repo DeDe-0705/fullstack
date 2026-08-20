@@ -1,10 +1,18 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../database/entities/user.entity';
 import { Conversation } from '../database/entities/conversation.entity';
 import { Message } from '../database/entities/message.entity';
-import { AddMessageInput, Page } from './interfaces/conversation.types';
+import {
+  AddMessageInput,
+  Page,
+  PaginationOptions,
+} from './interfaces/conversation.types';
 
 export type { AddMessageInput, Page } from './interfaces/conversation.types';
 
@@ -19,24 +27,34 @@ export class ConversationService {
 
   // 显式注册：用户名已存在时返回 409，不允许静默复用
   async createUser(name: string): Promise<User> {
-    const existing = await this.userRepo.findOne({ where: { name } });
+    const trimmed = name.trim();
+    const existing = await this.userRepo.findOne({ where: { name: trimmed } });
     if (existing) throw new ConflictException('用户名已存在');
-    return this.userRepo.save(this.userRepo.create({ name }));
+    return this.userRepo.save(this.userRepo.create({ name: trimmed }));
   }
 
   async findUserById(id: string): Promise<User | null> {
     return this.userRepo.findOne({ where: { id } });
   }
 
-  async findUserByName(name: string): Promise<User | null> {
-    return this.userRepo.findOne({ where: { name } });
+  // 存在性校验下沉到 service：controller 只接线，不判断
+  async getUserById(id: string): Promise<User> {
+    const user = await this.findUserById(id);
+    if (!user) throw new NotFoundException('用户不存在');
+    return user;
+  }
+
+  async getUserByName(name: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { name } });
+    if (!user) throw new NotFoundException('用户不存在');
+    return user;
   }
 
   async listConversations(
     userId: string,
-    limit: number,
-    offset: number,
+    pagination: PaginationOptions = {},
   ): Promise<Page<Conversation>> {
+    const { limit = 20, offset = 0 } = pagination;
     const [items, total] = await this.conversationRepo.findAndCount({
       where: { userId },
       order: { updatedAt: 'DESC' },
@@ -46,15 +64,19 @@ export class ConversationService {
     return { items, total };
   }
 
-  async createConversation(userId: string, title = '新对话'): Promise<Conversation> {
-    return this.conversationRepo.save(this.conversationRepo.create({ userId, title }));
+  async createConversation(userId: string, title?: string): Promise<Conversation> {
+    // 会话必须挂在真实用户下
+    await this.getUserById(userId);
+    return this.conversationRepo.save(
+      this.conversationRepo.create({ userId, title: title?.trim() || '新对话' }),
+    );
   }
 
   async getHistory(
     conversationId: string,
-    limit: number,
-    offset: number,
+    pagination: PaginationOptions = {},
   ): Promise<Page<Message>> {
+    const { limit = 50, offset = 0 } = pagination;
     // 先按 id 倒序取最近一段，再反转为正序返回，顺序稳定且天然支持分页
     const [rows, total] = await this.messageRepo.findAndCount({
       where: { conversationId },

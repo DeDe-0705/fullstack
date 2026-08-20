@@ -12,6 +12,12 @@ export interface Page<T> {
   total: number;
 }
 
+// 分页参数：service 只认数字，query string 的解析由 DTO + ValidationPipe 完成
+export interface PaginationOptions {
+  limit?: number;
+  offset?: number;
+}
+
 // 落库消息的可选元信息：状态、token 用量、思考耗时、供应商、模型、工具轨迹（仅 assistant 消息使用）
 export interface AddMessageInput {
   conversationId: string;

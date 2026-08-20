@@ -4,6 +4,14 @@ export const BASE_URL = '/api'
 // 后续接入真实登录后换成登录态换取的 token
 export const DEMO_TOKEN = 'dev-token-2024'
 
+// 与 server 端 ResponseInterceptor 的统一响应格式对齐
+interface ApiResponse<T> {
+  code: number
+  data: T
+  message: string
+  trace_id: string
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
@@ -20,7 +28,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     error.status = res.status
     throw error
   }
-  return res.json()
+  const body = (await res.json()) as ApiResponse<T>
+  // 业务码非 0 视为业务失败；排查问题时可凭 trace_id 找服务端日志
+  if (body.code !== 0) {
+    const error = new Error(body.message) as Error & { traceId?: string }
+    error.traceId = body.trace_id
+    throw error
+  }
+  return body.data
 }
 
 export const api = {

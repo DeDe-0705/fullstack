@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Inject,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import { ConversationService } from '../conversation/conversation.service';
 import { ToolsService } from '../tools/tools.service';
@@ -231,8 +230,8 @@ export class AgentService {
 
   private async prepareChat(input: AgentChatInput) {
     if (!input.message?.trim()) throw new BadRequestException('message 必填');
-    const user = await this.conversationService.findUserById(input.userId);
-    if (!user) throw new NotFoundException('用户不存在');
+    // 用户必须真实存在（不存在时 service 抛 404）
+    await this.conversationService.getUserById(input.userId);
 
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -252,8 +251,7 @@ export class AgentService {
 
     const { items: history } = await this.conversationService.getHistory(
       conversationId,
-      20,
-      0,
+      { limit: 20 },
     );
     const messages: ChatMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },

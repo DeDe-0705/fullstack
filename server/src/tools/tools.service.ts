@@ -34,8 +34,7 @@ export class ToolsService {
         if (!user) return JSON.stringify({ error: '用户不存在' });
         const { total } = await this.conversationService.listConversations(
           user.id,
-          1,
-          0,
+          { limit: 1 },
         );
         return JSON.stringify({
           id: user.id,
