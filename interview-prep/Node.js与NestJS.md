@@ -81,6 +81,65 @@ readStream.pipe(writeStream)  // 边读边写，不占内存
 
 **四种 Stream 类型：** Readable / Writable / Duplex / Transform
 
+### 1.4 Node.js 线程模型：单线程还是多线程？
+
+先说结论：**Node.js 不是「纯单线程」，而是「单线程的 JS 主线程 + 多层多线程」**。面试常见的「Node 是单线程」是个不严谨的说法，准确表述是「**开发者写的 JS 代码在单个主线程上串行执行**」。
+
+一句话拆解（腾讯云 2026-04 文章的结论，很适合写进设计文档）：
+
+> 单线程事件循环负责执行 JS 与调度回调；阻塞型/计算型的底层工作由内核异步能力与 libuv 线程池承担；需要 JS 真并行时，引入 worker_threads（或多进程 cluster）把计算摊到多个核心。
+
+#### 四层线程模型
+
+| 层 | 说明 | 是否跑 JS |
+| --- | --- | --- |
+| JS 主线程（Event Loop） | 执行 JS 代码、调度回调、单线程 | ✅ |
+| libuv 线程池 | 默认 4 线程，处理阻塞 I/O 与计算（fs / crypto / DNS / zlib / 压缩） | ❌ 跑 C/C++ |
+| V8 内部线程 | GC 垃圾回收、JIT 编译 | ❌ |
+| worker_threads / cluster | 真正的 JS 并行 | ✅ |
+
+#### 关键点
+
+1. **libuv 线程池默认 4 个**，环境变量 `UV_THREADPOOL_SIZE` 可调（最大 128）。它处理的是 `fs.readFile`（非 O_DIRECT）、`crypto.pbkdf2/scrypt`、`zlib`、DNS 解析等会阻塞的底层操作——这些是 C/C++ 代码，不是 JS。
+2. **线程池 ≠ worker_threads**：线程池是 libuv 管理的固定线程，只能跑底层 C/C++，**不能执行你的 JS**；worker_threads 是独立线程，每个 worker 拥有**完整的 V8 isolate + 自己的事件循环 + libuv loop**，能真正并行跑 JS。
+3. **worker_threads vs cluster**：worker 是同一进程内的线程，可用 `SharedArrayBuffer` 共享内存或 `postMessage` 传值；cluster 是多进程，master fork 多个子进程，通过 IPC 通信，跨核心扩展并发。
+
+```js
+// worker_threads：CPU 密集任务并行（fib 递归）
+const { Worker, isMainThread, parentPort, workerData } = require('worker_threads')
+
+if (isMainThread) {
+  // 主线程：4 个 worker 并行算
+  for (let i = 0; i < 4; i++) {
+    new Worker(__filename, { workerData: { n: 40 } })
+      .on('message', (r) => console.log('fib =', r))
+  }
+} else {
+  const fib = (n) => (n < 2 ? n : fib(n - 1) + fib(n - 2))
+  parentPort.postMessage(fib(workerData.n))
+}
+```
+
+```js
+// cluster：多进程利用多核，每个核一个 worker
+const cluster = require('cluster')
+const http = require('http')
+const os = require('os')
+
+if (cluster.isMaster) {
+  for (let i = 0; i < os.cpus().length; i++) cluster.fork()
+  cluster.on('exit', (worker) => cluster.fork()) // 挂了自动重启
+} else {
+  http.createServer((req, res) => res.end('pid=' + process.pid)).listen(3000)
+}
+```
+
+#### 选型口诀
+
+- **I/O 密集**：async/await + 事件循环即可，单线程够用（大部分 Web 服务属于这类）。
+- **CPU 密集**（图像处理、大 JSON 解析、加解密）：用 worker_threads，把长任务移出主事件循环。
+- **多核横向扩展**：cluster，或部署到 K8s 时用多副本 + resources limits（呼应字节面经「如何利用多核」）。
+
 ---
 
 ## 二、NestJS 核心概念

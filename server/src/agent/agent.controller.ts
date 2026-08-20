@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Post,
@@ -8,28 +7,18 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AgentService, AgentStreamEvent } from './agent.service';
-
-interface AgentChatBody {
-  userId?: string;
-  conversationId?: string;
-  message?: string;
-  /** 模型供应商，缺省由 AgentService 走默认值 */
-  provider?: string;
-}
+import { AgentChatDto } from './dto/agent-chat.dto';
 
 @Controller('api/agent')
 export class AgentController {
   constructor(private readonly agentService: AgentService) {}
 
   @Post('chat')
-  chat(@Body() body: AgentChatBody) {
-    if (!body.userId) throw new BadRequestException('userId 必填');
-    const message = body.message?.trim();
-    if (!message) throw new BadRequestException('message 必填');
+  chat(@Body() body: AgentChatDto) {
     return this.agentService.chat({
       userId: body.userId,
       conversationId: body.conversationId,
-      message,
+      message: body.message,
       provider: body.provider,
     });
   }
@@ -40,11 +29,8 @@ export class AgentController {
   async chatStream(
     @Req() req: Request,
     @Res() res: Response,
-    @Body() body: AgentChatBody,
+    @Body() body: AgentChatDto,
   ): Promise<void> {
-    if (!body.userId) throw new BadRequestException('userId 必填');
-    const message = body.message?.trim();
-    if (!message) throw new BadRequestException('message 必填');
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -67,7 +53,7 @@ export class AgentController {
         {
           userId: body.userId,
           conversationId: body.conversationId,
-          message,
+          message: body.message,
           provider: body.provider,
         },
         abort.signal,

@@ -6,10 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConversationService } from '../conversation/conversation.service';
 import { ToolsService } from '../tools/tools.service';
-import type {
-  Message,
-  MessageUsage,
-} from '../database/entities/message.entity';
+import type { MessageUsage } from '../database/entities/message.entity';
 import {
   ChatMessage,
   ChatToolCall,
@@ -17,39 +14,18 @@ import {
   ModelProvider,
   ModelToolDefinition,
 } from './providers/model-provider';
+import {
+  AgentChatInput,
+  AgentStreamEvent,
+  AgentToolTrace,
+} from './interfaces/agent.types';
 
-export interface AgentChatInput {
-  userId: string;
-  conversationId?: string;
-  message: string;
-  /** 用户选择的供应商，缺省走默认（当前为 deepseek） */
-  provider?: string;
-}
-
-export interface AgentToolTrace {
-  name: string;
-  arguments: string;
-  result: string;
-}
-
-export interface AgentDonePayload {
-  conversationId: string;
-  toolCalls: AgentToolTrace[];
-  /** 整轮（可能含多轮工具调用）聚合后的 token 用量 */
-  usage: MessageUsage | null;
-  /** 思考耗时：首次 reasoning 增量到首次 content 增量的毫秒数 */
-  thinkingMs: number | null;
-  /** 落库后的完整消息（含 status/tokenUsage/toolCalls 等元信息），前端直接写入缓存 */
-  assistantMessage: Omit<Message, 'conversation'>;
-}
-
-export type AgentStreamEvent =
-  | { kind: 'ready'; conversationId: string }
-  | { kind: 'reasoning'; delta: string }
-  | { kind: 'content'; delta: string }
-  | { kind: 'tool'; name: string; arguments: string; result: string }
-  | { kind: 'usage'; usage: MessageUsage }
-  | ({ kind: 'done' } & AgentDonePayload);
+export type {
+  AgentChatInput,
+  AgentDonePayload,
+  AgentStreamEvent,
+  AgentToolTrace,
+} from './interfaces/agent.types';
 
 const SYSTEM_PROMPT =
   '你是出入预约系统的 AI 助手。你可以调用 get_user_info 工具查询用户信息。' +

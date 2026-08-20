@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -9,6 +10,8 @@ async function bootstrap() {
     // .env 不存在时使用系统环境变量
   }
   const app = await NestFactory.create(AppModule);
+  // 全局 DTO 校验：whitelist 剥离未声明字段，transform 把 body 转成 DTO 类实例
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   // CORS 白名单从环境变量读，未配置时仅允许本地前端开发地址
   const origins = process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())

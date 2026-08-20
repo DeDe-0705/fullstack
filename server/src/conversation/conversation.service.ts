@@ -3,32 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../database/entities/user.entity';
 import { Conversation } from '../database/entities/conversation.entity';
-import {
-  Message,
-  MessageRole,
-  MessageStatus,
-  MessageToolCall,
-  MessageUsage,
-} from '../database/entities/message.entity';
+import { Message } from '../database/entities/message.entity';
+import { AddMessageInput, Page } from './interfaces/conversation.types';
 
-export interface Page<T> {
-  items: T[];
-  total: number;
-}
-
-// 落库消息的可选元信息：状态、token 用量、思考耗时、模型、工具轨迹（仅 assistant 消息使用）
-export interface AddMessageInput {
-  conversationId: string;
-  role: MessageRole;
-  content: string;
-  reasoning?: string | null;
-  status?: MessageStatus;
-  tokenUsage?: MessageUsage | null;
-  thinkingMs?: number | null;
-  provider?: string | null;
-  model?: string | null;
-  toolCalls?: MessageToolCall[] | null;
-}
+export type { AddMessageInput, Page } from './interfaces/conversation.types';
 
 @Injectable()
 export class ConversationService {
