@@ -113,7 +113,14 @@ const mutation = useMutation({
 
 ## 四、invalidateQueries：写后同步读缓存
 
-写入成功后，读缓存里的旧数据已过时。`queryClient.invalidateQueries({ queryKey })` 会把匹配的 query 标记为 stale 并触发重新拉取，保证「写后读到最新数据」。
+写入成功后，读缓存里的旧数据已过时。`queryClient.invalidateQueries({ queryKey })` 会把匹配的 query 标记为 stale（失效），保证「写后读到最新数据」。
+
+注意：invalidateQueries 本身**只是标记失效**，真正重新发请求是后续自动行为，且默认只对「活跃」的 query 生效：
+
+- 活跃的 query（当前有组件挂载订阅）→ 立即自动重新拉取
+- 非活跃的 query → 只标记失效，等下次有组件用它时才拉取（可用 `refetchType: 'all'` 强制全部重取）
+
+queryKey 支持前缀匹配：`invalidateQueries({ queryKey: ['posts'] })` 会匹配 `['posts','list']`、`['posts','detail',1]` 等所有以 `['posts']` 开头的 key。
 
 三种让缓存更新的方式：
 
@@ -123,10 +130,62 @@ const mutation = useMutation({
 
 ---
 
-## 五、高频考点速查
+## 五、QueryClient：缓存中枢
+
+QueryClient 是 TanStack Query 的**中央缓存管理器**，所有查询缓存、失效、预取都由它负责。通过 `QueryClientProvider` 注入 React 树，`useQuery` / `useMutation` 内部通过 context 拿到它。
+
+### 5.1 配置（结合本仓库 queryClient.ts）
+
+```ts
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,  // 30s 内数据视为新鲜，切页回来不重新请求
+      retry: 1,
+    },
+  },
+})
+```
+
+### 5.2 staleTime vs gcTime（面试高频）
+
+| 参数 | 含义 | 默认 |
+| --- | --- | --- |
+| `staleTime` | 数据多久后变「陈旧(stale)」，陈旧后下次挂载/聚焦会后台刷新，**不清缓存** | 0（每次挂载都拉） |
+| `gcTime` | 缓存保留时长，超过且**无人订阅**时被垃圾回收（v5 名，原名 cacheTime） | 5 分钟 |
+
+关键点：
+
+- `gcTime` 只在「没有活跃订阅者（组件已卸载）」后才开始计时；组件挂载期间它不起作用。
+- 通常要求 `gcTime >= staleTime`，否则数据可能还没被用到就被回收。
+
+### 5.3 核心方法
+
+| 方法 | 作用 |
+| --- | --- |
+| `getQueryData(key)` | 同步读缓存 |
+| `setQueryData(key, data)` | 直接写缓存（乐观更新用） |
+| `invalidateQueries(key)` | 标记失效 → 触发重取 |
+| `prefetchQuery(key, fn)` | 预取数据放入缓存（路由预加载） |
+| `cancelQueries(key)` | 取消进行中的请求 |
+| `removeQueries` / `clear` | 删除缓存 |
+
+### 5.4 注入 React 树
+
+```tsx
+<QueryClientProvider client={queryClient}>
+  <App />
+</QueryClientProvider>
+```
+
+---
+
+## 六、高频考点速查
 
 1. **useMutation 和 useQuery 区别？** → 写 vs 读；手动命令式 vs 自动声明式；不缓存 vs 缓存。
 2. **useMutation 的生命周期？** → onMutate → mutationFn → onSuccess/onError → onSettled。
 3. **写完数据后列表怎么更新？** → onSuccess 里 invalidateQueries 让缓存失效重取。
 4. **什么是乐观更新？怎么回滚？** → onMutate 先改缓存 + 备份 context，onError 用 context 回滚，onSettled 最终 invalidate 对齐。
 5. **mutate 和 mutateAsync 区别？** → mutate 返回 undefined，mutateAsync 返回 Promise。
+6. **staleTime 和 gcTime 区别？** → staleTime 决定数据多久变陈旧（触发后台刷新，不清缓存）；gcTime 决定缓存多久后被回收（只在无订阅者时计时）。
+7. **QueryClient 是什么？** → 中央缓存管理器，负责缓存、失效、预取，通过 QueryClientProvider 注入。

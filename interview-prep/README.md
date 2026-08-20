@@ -17,6 +17,7 @@
 
 - [Vue3 深度原理](./Vue3深度原理.md) — 响应式系统(Proxy)、虚拟DOM diff、Compiler优化、Composition API、生命周期、组件通信、内置组件原理、Vue 3.5/3.6 新特性
 - [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、Diff与render/commit阶段、并发模式、受控/非受控组件、合成事件、性能优化、React 19新特性(Actions/use/RSC)、状态管理(Redux/Zustand)、与Vue对比
+- [React面试考点地图](./React面试考点地图.md) — 大厂评判标准、七层考点地图、高频必考清单、自测清单
 - [TanStack Query核心](./TanStackQuery核心.md) — 服务端状态管理、useQuery读/useMutation写、生命周期、invalidateQueries缓存失效、乐观更新与回滚
 
 ## 三、工程与性能
