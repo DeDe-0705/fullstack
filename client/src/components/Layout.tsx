@@ -44,7 +44,7 @@ export function Layout() {
       </AntLayout.Header>
       <AntLayout.Content
         style={{
-          padding: 16,
+          padding: 8,
           boxSizing: "border-box",
         }}
       >

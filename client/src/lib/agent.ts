@@ -100,6 +100,11 @@ export const userConversationsOptions = (userId: string | undefined) =>
     enabled: Boolean(userId),
   })
 
+// 重命名会话：URL 的 :id 是会话 id，userId 放 body 供服务端做归属校验
+export const editConversation = (userId: string, conversationId: string, title: string) =>
+  api.post<AgentConversation>(`/conversations/${conversationId}/edit`, { userId, title })
+
+
 export const messagesOptions = (conversationId: string | undefined) =>
   queryOptions({
     queryKey: ['agent', 'messages', conversationId],
@@ -118,7 +123,7 @@ export const sendChat = (input: {
 }) => api.post<AgentChatResponse>('/agent/chat', input)
 
 // 流式对话：用 fetch 手动解析 SSE，POST 请求可以把参数放 body，EventSource 做不到
-export async function sendChatStream(
+export async function sendChatStream (
   input: { userId: string; conversationId?: string; message: string },
   handlers: AgentStreamHandlers,
   signal?: AbortSignal,
@@ -198,7 +203,7 @@ export async function sendChatStream(
   }
 
   try {
-    for (;;) {
+    for (; ;) {
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })

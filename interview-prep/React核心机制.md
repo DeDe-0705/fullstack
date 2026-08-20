@@ -291,6 +291,26 @@ React 18 + createRoot（Automatic Batching）：
 
 **函数式更新的意义：** `setCount(c => c + 1)` 拿到的是最新值，避免在连续更新时闭包读到旧值；`setCount(count + 1)` 读到的是"本次渲染"的 count，连续调用可能互相覆盖。
 
+**useState 能不能传「更新完成后回调」？**
+
+- class 组件的 `this.setState(updater, callback)` 第二个参数才是「更新完成后回调」，在 componentDidUpdate 后执行。
+- 函数组件的 `useState` / `useReducer` **不支持第二个回调参数**（React 官方明确，传了会警告）。
+- 别混淆：`setCount(prev => prev + 1)` 里的函数是「**函数式更新**」，作用是**基于旧值计算新值**，不是「完成后回调」——它可能被延迟调用、甚至多次调用，绝不能当回调用。
+- 要做 set 之后的后续事情，用 `useEffect(() => {...}, [count])`：它在 DOM 更新（commit）后执行，能拿到最新状态。
+
+```tsx
+// ❌ useState 不支持第二个参数回调
+setCount(count + 1, () => console.log('done')) // 会有警告
+
+// ❌ 函数式更新不是回调，别在里面做副作用
+setCount(prev => { console.log('不是回调'); return prev + 1 })
+
+// ✅ 正确：用 useEffect 响应状态变化
+useEffect(() => {
+  console.log('count 更新为', count)
+}, [count])
+```
+
 ---
 
 ## 四、并发模式（Concurrent Mode）
