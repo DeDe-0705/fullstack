@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query'
-import { api, BASE_URL } from './api'
+import { api, BASE_URL, DEMO_TOKEN } from './api'
 
 export interface AgentUser {
   id: string
@@ -128,6 +128,7 @@ export async function sendChatStream(
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      Authorization: `Bearer ${DEMO_TOKEN}`,
     },
     body: JSON.stringify(input),
     signal,

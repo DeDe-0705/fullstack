@@ -1,8 +1,15 @@
 export const BASE_URL = '/api'
 
+// 演示用的固定 token，与 server 端 guards/token.guard.ts 的 DEMO_TOKEN 一致；
+// 后续接入真实登录后换成登录态换取的 token
+export const DEMO_TOKEN = 'dev-token-2024'
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEMO_TOKEN}`,
+    },
     ...options,
   })
   if (!res.ok) {

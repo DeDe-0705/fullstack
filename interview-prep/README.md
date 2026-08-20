@@ -29,6 +29,7 @@
 
 - [Node.js与NestJS](./Node.js与NestJS.md) — Node 事件循环/模块系统/Stream + NestJS 基础架构、依赖注入、横切关注点、项目实战话术
 - [NestJS面试考点大全](./NestJS面试考点大全.md) — 2026 大厂版：DI 原理/AOP 生命周期/ORM 选型/JWT 鉴权/微服务 gRPC/性能高并发/场景题全覆盖
+- [Elasticsearch基础](./Elasticsearch基础.md) — ES是什么、倒排索引、Index/Document/Shard/Replica核心概念、ES vs MySQL选型、使用场景与高频考点
 - [微前端专题](./微前端专题.md) — 概念与价值、qiankun/无界/Micro-app/Module Federation对比、无界实战、通信/鉴权/路由方案
 - [算法基础](./算法基础.md) — 排序(快排/归并)、树遍历、链表操作、动态规划入门、经典场景题
 - [手写代码](./手写代码.md) — 防抖节流、深拷贝、Promise.all/并发控制、LRU、bind/call/apply、虚拟列表、柯里化、继承
