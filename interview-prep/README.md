@@ -19,6 +19,7 @@
 - [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、Diff与render/commit阶段、并发模式、受控/非受控组件、合成事件、性能优化、React 19新特性(Actions/use/RSC)、状态管理(Redux/Zustand)、与Vue对比
 - [React面试考点地图](./React面试考点地图.md) — 大厂评判标准、七层考点地图、高频必考清单、自测清单
 - [TanStack Query核心](./TanStackQuery核心.md) — 服务端状态管理、useQuery读/useMutation写、生命周期、invalidateQueries缓存失效、乐观更新与回滚
+- [Redux核心](./Redux核心.md) — 三大原则、单向数据流、Redux Toolkit(createSlice/configureStore)、createAsyncThunk三态、thunk vs saga、Redux vs Zustand
 
 ## 三、工程与性能
 
@@ -42,6 +43,7 @@
 
 - [项目复盘与面试话术](./项目复盘与面试话术.md) — Li People/理想同事/组织信息管理/出入预约 四大项目STAR话术、系统设计题
 - [React 代码实践复盘](./React代码实践复盘.md) — 通过 client 代码学习 React 核心机制（Hooks 闭包陷阱、setState、useEffect、自定义 Hook、性能优化、React 19），记录踩坑与面试话术
+- [C端项目场景题 — Vue & React](./C端场景题-Vue与React.md) — 2026 大厂版：电商/搜索/购物车/秒杀/Feed/短视频/IM/地图/权限/表单/上传/SSR/AI 场景题与双框架落地点
 
 ---
 
