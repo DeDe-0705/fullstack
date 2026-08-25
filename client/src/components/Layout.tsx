@@ -6,6 +6,8 @@ const NAV_ITEMS = [
   { key: "/posts", label: "帖子" },
   { key: "/about", label: "关于" },
   { key: "/agent", label: "Agent 对话" },
+  { key: "/shop", label: "Shop 场景实战" },
+  { key: "/c-end", label: "C端场景实战" },
   {
     key: "/learn",
     label: "React 学习",
@@ -15,6 +17,7 @@ const NAV_ITEMS = [
       { key: "/learn/custom-hooks", label: "自定义 Hook 设计" },
       { key: "/learn/render-optimization", label: "渲染优化" },
       { key: "/learn/react-19", label: "React 19 新特性" },
+      { key: "/learn/fixed-virtual-list", label: "定高虚拟滚动" },
     ],
   },
 ];

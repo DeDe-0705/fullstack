@@ -11,8 +11,18 @@ import { UseEffectLifecycle } from "../pages/learn/UseEffectLifecycle";
 import { CustomHooks } from "../pages/learn/CustomHooks";
 import { RenderOptimization } from "../pages/learn/RenderOptimization";
 import { React19Features } from "../pages/learn/React19Features";
+import { FixedVirtualList } from "../pages/learn/FixedVirtualList";
 import { queryClient } from "../lib/queryClient";
 import { postDetailOptions } from "../lib/posts";
+import { ShopLayout } from "../features/shop/ShopLayout";
+import { ProductList } from "../features/shop/ProductList";
+import { ProductDetail } from "../features/shop/ProductDetail";
+import { CartPage } from "../features/shop/CartPage";
+import { CheckoutPage } from "../features/shop/CheckoutPage";
+import { productDetailOptions } from "../features/shop/queries";
+import { CEndLayout } from "../features/cend/CEndLayout";
+import { SearchPage } from "../features/cend/SearchPage";
+import { FeedPage } from "../features/cend/FeedPage";
 
 export const router = createBrowserRouter([
   {
@@ -37,6 +47,33 @@ export const router = createBrowserRouter([
       { path: "learn/custom-hooks", element: <CustomHooks /> },
       { path: "learn/render-optimization", element: <RenderOptimization /> },
       { path: "learn/react-19", element: <React19Features /> },
+      { path: "learn/fixed-virtual-list", element: <FixedVirtualList /> },
+      {
+        path: "shop",
+        element: <ShopLayout />,
+        children: [
+          { index: true, element: <ProductList /> },
+          {
+            path: "product/:id",
+            // Router loader 预取 + TanStack Query 缓存结合：
+            // 进入详情页前先确保数据已进缓存，组件渲染时 useQuery 直接命中，避免 loading 闪烁
+            loader: ({ params }) =>
+              queryClient.ensureQueryData(productDetailOptions(Number(params.id))),
+            element: <ProductDetail />,
+          },
+          { path: "cart", element: <CartPage /> },
+          { path: "checkout", element: <CheckoutPage /> },
+        ],
+      },
+      {
+        path: "c-end",
+        element: <CEndLayout />,
+        children: [
+          { index: true, element: <SearchPage /> },
+          { path: "search", element: <SearchPage /> },
+          { path: "feed", element: <FeedPage /> },
+        ],
+      },
       { path: "*", element: <NotFound /> },
     ],
   },

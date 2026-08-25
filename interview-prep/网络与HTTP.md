@@ -133,7 +133,11 @@ Charles 代理后：
 
  常用指令：`max-age` / `no-cache`(每次验证) / `no-store`(不缓存) / `public`(代理可缓存) / `private` / `immutable`(永不变化)
 
- ### 协商缓存（发请求问服务器）
+> ⚠️ **易错（高频坑）**：`no-store` 和 `no-cache` 别记反——`no-store` 是「完全不缓存」（本地连副本都不存，每次全量请求）；`no-cache` 是「可以缓存，但每次用之前必须到服务器验证」（这才是走协商缓存）。
+
+> **强缓存命中「不发请求」**，DevTools 显示 `200 (from memory cache)` / `200 (from disk cache)`——memory/disk 是「缓存放哪里」，状态码仍是 200，不是「状态码 = memory/disk」。
+
+### 协商缓存（发请求问服务器）
 
  | 请求头 | 响应头 | 方式 |
  |--------|--------|------|

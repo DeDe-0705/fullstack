@@ -402,7 +402,115 @@ button.addEventListener('click', () => {
 
 加分认知：**循环引用本身不可怕**——若实例和 DOM 整体都不可达，标记清除 GC 一样能回收整环；WeakMap 失效只发生在"实例被外部继续持有"时。Vue 的做法是把实例挂到 DOM 上（`el.__vueParentComponent`），方向是 DOM → 实例，且实例、vnode、DOM 生命周期同步，整体一起不可达，所以强引用也不泄漏。
 
-### 3.5 Proxy（Vue3 响应式的基础）
+### 3.5 Symbol（ES6 第 7 种原始类型）
+
+**解决的核心问题：给对象加"绝对不会和别人冲突"的属性 key。** 对象的属性 key 只有字符串和 Symbol 两种，字符串必然存在命名冲突风险，Symbol 每次创建都唯一。
+
+```js
+const a = Symbol('name')
+const b = Symbol('name')
+console.log(a === b)  // false — 即使描述相同也不相等
+```
+
+**五大使用场景：**
+
+**场景 1：对象私有属性（最常用）**
+
+```js
+const _count = Symbol('count')
+
+class Counter {
+  constructor() { this[_count] = 0 }
+  increment() { this[_count]++ }
+  getCount() { return this[_count] }
+}
+
+const c = new Counter()
+console.log(c._count)               // undefined — 外部访问不到
+console.log(Object.keys(c))         // [] — 不可枚举
+console.log(Object.getOwnPropertySymbols(c))  // [Symbol(count)] — 但可以刻意获取
+```
+
+> Symbol 方案是"半私有"——防误访问但不防刻意访问。ES2022 的 `#private` 字段是真正的私有，按场景选。
+
+**场景 2：消除魔术字符串**
+
+```js
+// ❌ 字符串容易拼错、语义不明确
+if (type === 'admin') { ... }
+
+// ✅ Symbol 保证唯一，IDE 跳转友好
+const ROLE = {
+  admin: Symbol('admin'),
+  editor: Symbol('editor'),
+  viewer: Symbol('viewer'),
+}
+```
+
+**场景 3：内置 Symbol —— 控制对象底层行为（面试高频）**
+
+```js
+// Symbol.iterator — 让对象可迭代（for...of、展开、解构的基础）
+const range = {
+  from: 1, to: 3,
+  [Symbol.iterator]() {
+    let cur = this.from; const end = this.to
+    return { next() { return cur <= end ? { value: cur++, done: false } : { done: true } } }
+  }
+}
+console.log([...range])  // [1, 2, 3]
+
+// Symbol.toPrimitive — 控制对象转原始值的行为
+const price = {
+  value: 99,
+  [Symbol.toPrimitive](hint) {
+    if (hint === 'number') return this.value
+    if (hint === 'string') return `¥${this.value}`
+    return this.value
+  }
+}
+console.log(+price)       // 99
+console.log(`${price}`)   // "¥99"
+
+// Symbol.hasInstance — 自定义 instanceof
+// Symbol.toStringTag — 自定义 Object.prototype.toString 结果
+```
+
+**场景 4：常量唯一标识（Redux/Vuex Action Type）**
+
+```js
+// 大型项目中字符串 action type 容易冲突
+export const SET_LOADING = Symbol('SET_LOADING')  // 绝对不冲突
+```
+
+**场景 5：Symbol.for() — 全局共享 Symbol**
+
+```js
+Symbol('key') === Symbol('key')          // false — 每次唯一
+Symbol.for('key') === Symbol.for('key')  // true — 全局注册表查找/创建
+
+// 场景：跨 iframe / 跨 Realm 共享标识；多个库引用同一个 Symbol 标记
+```
+
+**注意事项（面试易错点）：**
+
+```js
+// 1. 不可枚举
+const sym = Symbol('hidden')
+const obj = { [sym]: 'value', name: 'visible' }
+Object.keys(obj)    // ['name'] — for...in / Object.keys 都拿不到
+JSON.stringify(obj) // '{"name":"visible"}' — JSON 序列化忽略
+
+// 2. 不能隐式转字符串
+sym + ''     // TypeError
+sym.toString()  // "Symbol(hidden)" — 需要显式调用
+
+// 3. 作为属性 key 必须用方括号
+obj[sym] = 'correct'  // ✅
+// obj.sym = 'wrong'  // ❌ 创建的是字符串 key "sym"
+```
+
+### 3.6 Proxy（Vue3 响应式的基础）
 
 ```js
 const obj = { name: 'Alice', age: 25 }
@@ -422,7 +530,7 @@ proxy.name       // → 读取 name → 'Alice'
 proxy.age = 30   // → 设置 age = 30
 ```
 
-### 3.6 Reflect
+### 3.7 Reflect
 
 `Reflect` 是操作对象的"标准化工具"，和 Proxy 的 handler 方法一一对应：
 
@@ -658,6 +766,7 @@ null === undefined       // false
 | let/const/var | 块级/块级/函数作用域；TDZ；const 必须初始化 |
 | 箭头函数 this | 定义时继承词法作用域，无法改变 |
 | 闭包 | 函数记住词法作用域，timer/模块/柯里化 |
+| Symbol | 唯一key防冲突：私有属性、魔术字符串、Symbol.iterator、Symbol.for全局共享 |
 | Proxy 作用 | Vue3 响应式基础，拦截 13 种操作 |
 | this 绑定优先级 | new > 显式(call/apply/bind) > 隐式(obj.fn) > 默认 |
 | == vs === | === 永远用；== 有隐性转换，null==undefined 不常用 |

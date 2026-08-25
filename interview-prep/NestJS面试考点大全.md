@@ -563,6 +563,39 @@ const token = await this.jwtService.signAsync(
 - **token 放哪安全？** httpOnly + Secure Cookie 比 localStorage 更抗 XSS；但 cookie 要防 CSRF，localStorage 要防 XSS，二选一看场景。
 - **JWT 和 Session 的区别？** JWT 无状态、适合分布式/微服务；Session 有状态、可随时注销，适合单体 + 内存/Redis。
 
+**JWT 三段结构（Header / Payload / Signature）：**
+
+JWT 用 `.` 分成三段，且都是 **Base64Url** 编码（不是 Base64，为了能安全放进 URL / Header）：
+
+```
+Header.Payload.Signature
+```
+
+| 段 | 作用 | 关键点 |
+|----|------|--------|
+| Header | 声明「怎么验」：`alg` 签名算法 + `typ: JWT` | 决定验签算法 |
+| Payload | 声明「装什么」：claims（`sub/exp/role/userId`） | Base64Url 只是编码不是加密，别放敏感信息 |
+| Signature | 声明「能不能信」：对前两段做签名 | 防篡改、不可伪造，但不保密 |
+
+签名公式：
+
+```
+HMACSHA256(base64Url(header) + "." + base64Url(payload), secret)
+```
+
+易错 / 追问：
+
+- **JWT 是加密吗？** 不是，是签名；payload 可解码，机密信息需再套一层加密。
+- **HS256 vs RS256？** HS256 对称（同一个 secret 签发 + 校验）；RS256 非对称（私钥签发、公钥校验），适合微服务 / 第三方，避免 secret 扩散。
+- **算法混淆攻击？** 攻击者把 header 的 `alg` 从 RS256 改成 HS256，诱导服务端用「公钥」当 HMAC secret 验签；服务端必须**显式白名单算法**（如 `algorithms: ['RS256']`），不能只信 header 里的 alg。
+- **为什么无状态？** 服务端不存 session，靠签名自校验；代价是无法主动吊销，需短过期 + refresh 旋转 + 黑名单。
+
+**参考来源：**
+
+- JWT 从原理到调试：结构 / 签名算法 / 常见坑（2026-07）— https://chdh.me/reports/jwt-explained-2026/
+- JWT Algorithm Confusion Attacks（RS256→HS256 / none / JWK 注入，2026-05）— https://payloadplayground.com/blog/jwt-algorithm-confusion-attacks
+- 阿里云开发者社区：JWT 令牌的工作原理、结构和签名验证（2026-05）— https://developer.aliyun.com/article/1732272
+
 ### 6.2 Passport 集成
 
 - `@nestjs/passport` + `passport-jwt` / `passport-local`；

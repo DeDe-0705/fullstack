@@ -49,6 +49,8 @@
 
 **React 落地点：** `useDeferredValue` 降低输入卡顿；自定义 `useDebounce` + `useEffect` cleanup 取消请求。
 
+> 🔗 可运行实操：`/c-end/search`（防抖 + TanStack Query signal 取消竞态 + `<mark>` 高亮），见 [React场景实战](./React场景实战-Router与状态管理.md) 8.1。
+
 **追问：** 用户快速输入「vue」最终结果怎么保证？缓存要不要持久化？空结果页怎么设计？
 
 ---
@@ -107,6 +109,8 @@
 **Vue 落地点：** `shallowRef` 存大数组；`v-memo` 减少重复渲染；`onActivated` 恢复滚动位置。
 
 **React 落地点：** TanStack Virtual / react-window；`useLayoutEffect` 处理滚动恢复；`React.memo` 隔离广告位等复杂子组件。
+
+> 🔗 可运行实操：`/c-end/feed`（`useInfiniteQuery` 游标分页 + IntersectionObserver 哨兵预加载），见 [React场景实战](./React场景实战-Router与状态管理.md) 8.2。
 
 **追问：** 不定高列表怎么测量和缓存？快速滚动怎么防白屏？回到顶部 / 恢复上次位置怎么做？
 

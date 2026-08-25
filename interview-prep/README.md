@@ -18,6 +18,8 @@
 - [Vue3 深度原理](./Vue3深度原理.md) — 响应式系统(Proxy)、虚拟DOM diff、Compiler优化、Composition API、生命周期、组件通信、内置组件原理、Vue 3.5/3.6 新特性
 - [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、Diff与render/commit阶段、并发模式、受控/非受控组件、合成事件、性能优化、React 19新特性(Actions/use/RSC)、状态管理(Redux/Zustand)、与Vue对比
 - [React面试考点地图](./React面试考点地图.md) — 大厂评判标准、七层考点地图、高频必考清单、自测清单
+- [React一周速成计划](./React一周速成计划.md) — 7 天冲刺时间表：Vue→React 心智迁移、每日必读+实操 Demo+自测题、React 必考 12 题
+- [React场景实战-Router与状态管理](./React场景实战-Router与状态管理.md) — 电商闭环实操：Router(URL状态/loader预取) + TanStack Query(服务端状态) + Zustand(客户端状态) + Redux(流程状态机)，含选型对比与面试话术
 - [TanStack Query核心](./TanStackQuery核心.md) — 服务端状态管理、useQuery读/useMutation写、生命周期、invalidateQueries缓存失效、乐观更新与回滚
 - [Redux核心](./Redux核心.md) — 三大原则、单向数据流、Redux Toolkit(createSlice/configureStore)、createAsyncThunk三态、thunk vs saga、Redux vs Zustand
 
@@ -27,6 +29,8 @@
 - [前端工程化-组件库实战](./前端工程化-组件库实战.md) — ui-kit 实操：组件库打包、git tag、CI/CD、npm 发布全链路（2026-08）
 - [性能优化体系](./性能优化体系.md) — 网络/构建/渲染/运行时四层优化、Core Web Vitals、虚拟列表
 - [Docker与K8s部署](./Docker与K8s部署.md) — Docker镜像/分层/底层原理(namespace+cgroups)、Dockerfile多阶段构建、Compose编排、K8s架构与部署、CI/CD/GitOps
+
+- [SSE流式处理与AI前端](./SSE流式处理与AI前端.md) — 2026大厂新增独立考点：SSE vs WebSocket、Fetch+ReadableStream、粘包半包、断线重连+指数退避、流式Markdown增量渲染、打字机性能优化
 
 ## 四、进阶专题
 
@@ -38,6 +42,7 @@
 - [微前端专题](./微前端专题.md) — 概念与价值、qiankun/无界/Micro-app/Module Federation对比、无界实战、通信/鉴权/路由方案
 - [算法基础](./算法基础.md) — 排序(快排/归并)、树遍历、链表操作、动态规划入门、经典场景题
 - [手写代码](./手写代码.md) — 防抖节流、深拷贝、Promise.all/并发控制、LRU、bind/call/apply、虚拟列表、柯里化、继承
+- [手撕场景题](./手撕场景题.md) — 图片懒加载、搜索防抖竞态、文件分片上传/断点续传/秒传、无限滚动、虚拟列表、EventBus、状态管理、路由、WebSocket 重连、RAG 等 21 个完整实现 + 追问
 
 ## 五、项目与面试
 

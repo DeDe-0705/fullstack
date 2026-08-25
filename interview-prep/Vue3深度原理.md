@@ -6,6 +6,62 @@
 
 ---
 
+## 零、总纲：编译期与运行时（Vue2 vs Vue3）
+
+### 0.1 compiler 和 runtime 分别是什么
+
+| | 职责 | 什么时候跑 | 产物 |
+|---|---|---|---|
+| Runtime（运行时） | 响应式、组件渲染、虚拟 DOM、diff / patch | 浏览器里执行 | 真实 DOM |
+| Compiler（编译器） | 模板 → render 函数 / vnode，并做静态分析优化 | 构建时（或浏览器全量版） | render 函数 |
+
+一句话：**compiler 负责「翻译 + 优化」模板，runtime 负责「跑起来」并做 diff。**
+
+### 0.2 Vue2 vs Vue3：编译器和运行时的协同程度变了
+
+- **Vue2**：编译器基本只做「模板 → render 函数」的翻译，优化很少；运行时拿到**普通 vnode**，**全量递归 diff**。→ 编译期省力，运行时费力。
+- **Vue3**：编译器做大量静态分析（静态提升、PatchFlag、Block Tree、预字符串化、事件缓存），把优化信息**编码进 vnode**；运行时按标记**只 diff 动态节点**。→ 编译期做重活，运行时省力。
+
+本质：**Vue3 把「运行时才能知道的信息」提前到「编译期」就标记好了。**
+
+### 0.3 runtime 三大变化（Vue2 → Vue3）
+
+**① 响应式系统（最底层）**
+
+| | Vue2 | Vue3 |
+|---|---|---|
+| 实现 | Object.defineProperty | Proxy |
+| 初始化 | 递归劫持所有属性 | 惰性代理（访问到才包装） |
+| 新增 / 删除属性 | 感知不到（$set / $delete） | 能感知 |
+| 数组索引 / 长度 | 感知不到（重写数组方法） | 能感知 |
+
+**② Diff 算法**
+
+| | Vue2 双端 diff | Vue3 快速 diff |
+|---|---|---|
+| 策略 | 首首 / 尾尾 / 首尾 / 尾首 四指针 | 头尾同步 + 中间 LIS |
+| 中间乱序 | 反复遍历查找 key，可能退化 O(n²) | keyToNewIndexMap + LIS，O(n log n) |
+| 移动次数 | 较多 | 最少 |
+
+**③ 更新调度器**
+
+Vue3 有专门的 `flushJobs`：队列**去重**（同一组件多次改只更新一次）+ **按 id 排序**（父先于子）+ 微任务 flush。这就是 `nextTick` 能拿到「更新后 DOM」的原因。
+
+### 0.4 编译期优化 vs runtime diff 是两个层面
+
+```
+编译期（PatchFlag / BlockTree / 静态提升）→ 缩小 diff 的「范围」（跳过静态）
+运行时（快速 diff / LIS）              → 减少 diff 的「操作次数」（最少移动）
+```
+
+一个减范围、一个减移动，叠加才是完整的「Vue3 diff 快」。
+
+### 0.5 构建形态：Full vs Runtime-only
+
+- **完整版（full）**：compiler + runtime 都有，浏览器里能直接编译 `template`；
+- **运行时版（runtime-only）**：只有 runtime，更小，但模板必须在**构建时**预编译（vue-loader / @vue/compiler-sfc）；
+- 项目里 `import Vue from 'vue'` 基本都是 runtime-only + 预编译。
+
 ## 一、响应式系统
 
 ### 1.1 Vue2 vs Vue3 响应式对比
@@ -203,12 +259,14 @@ class RefImpl {
 | 维度 | ref | reactive |
 |------|-----|----------|
 | 数据类型 | 任意类型（基本类型 + 对象） | 仅对象/数组 |
-| 解构 | 不会丢失响应式 | 会丢失响应式（需 toRefs） |
+| 解构 | 不适用（ref 是单值，用 `.value`） | 会丢失响应式（需 toRefs） |
 | 重新赋值 | 不会丢失响应式 | 会丢失响应式 |
 | template 中 | 自动解包 .value | 直接使用 |
 | watch 监听 | 可直接传 ref（自动解包） | 直接监听（默认 deep） |
 
-**关键结论：** 能用 ref 就别用 reactive。ref 重新赋值不丢响应式，解构不丢，心智负担更小。reactive 主要用于表单对象、配置对象等不需要重新赋值的场景。
+**关键结论：** 能用 ref 就别用 reactive。ref 重新赋值（`r.value = x`）不丢响应式；reactive 整体替换 / 解构都会丢（`toRefs` 保解构）。reactive 主要用于表单对象、配置对象等不需要重新赋值的场景。
+
+> ⚠️ **易错**：解构时两者都会丢——`const { count } = reactive({ count: 1 })` 的 count 是普通值；`const { value } = ref(1)` 的 value 也是普通值。区别是 ref 是单值、本来不需要解构；要保 reactive 解构用 `toRefs()`。**ref 真正的优势是「重新赋值」，不是「解构」**。
 
 **真实源码补充：** 上面的 Proxy 实现是简化版。Vue 内部用 `reactiveMap: WeakMap` 缓存 `target → proxy`，同一个原始对象只会被代理一次；get 返回嵌套对象时通过 `toReactive` 复用已有代理，而不是每次新建。所以 `reactive(obj) === reactive(obj)` 恒成立。
 
@@ -267,6 +325,30 @@ class ComputedRefImpl {
 ```
 
 **面试话术：** computed 内部维护了一个 `_dirty` 标志。依赖不变时直接返回缓存值，依赖变化只把 `_dirty` 置为 true（不立即计算），直到下一次访问 .value 才真正执行计算。这就是"惰性求值"。
+
+#### computed 的两层短路（2026 高频深挖）
+
+"依赖变了但值没变"的场景有两层 Object.is 短路，位置不同、挡住的东西不同：
+
+| | 第一层 | 第二层 |
+|--|--------|--------|
+| 位置 | **数据源 set**（ref / reactive 拦截器） | **computed 求值之后**（ComputedRefImpl 内部） |
+| 判断 | `hasChanged(newValue, oldValue)` 新旧值是否相等 | `hasChanged(newResult, oldResult)` 新旧**计算结果**是否相等 |
+| 挡住什么 | trigger 本身——依赖通知根本不发生 | `triggerRefValue`——computed 的订阅者不被通知 |
+| 效果 | computed 不重算，dirty 不置位 | 视图不重渲（渲染 effect 不执行，没有 vnode、没有 diff） |
+
+```js
+firstName.value = '德'   // 赋相同的值
+// 第一层短路：ref setter 里 hasChanged 为 false → 直接 return
+// → trigger 没执行 → computed 的 dirty 未置位 → 返回缓存
+
+firstName.value = '王'   // 真变了，但 computed 结果恰好没变
+// 第一层通过 → dirty = true → 求值
+// 第二层短路：求值后 hasChanged(新结果, 旧结果) 为 false
+// → 不 triggerRefValue → 渲染 effect 不重跑 → 视图不更新
+```
+
+注意第三道保险（渲染 effect 重跑了但新 vnode 与旧 vnode 相同 → patch 无操作）确实存在，但用它解释上述场景是答非所问——前两层短路下渲染 effect 根本不会执行。
 
 ### 1.6 watch vs watchEffect
 
@@ -328,6 +410,52 @@ const state = reactive({ a: 1, b: 2, nested: { x: 10 } })
 **浅层响应式：** `shallowRef` / `shallowReactive` 只代理第一层，适合"整体替换、内部不变"的大对象；`triggerRef(shallowRef)` 可强制触发依赖。
 
 **跳过代理：** `markRaw` 标记对象永不被代理（第三方库实例、图标对象），避免无意义的劫持开销；`readonly` / `shallowReadonly` 做只读包装，组件的 props 本质就是 shallowReadonly。
+
+#### toRaw / markRaw / proxyMap：Proxy 局限的三大补救（2026-08-23 补）
+
+| API | 一句话 | 补的 Proxy 局限 |
+|-----|--------|----------------|
+| `toRaw(proxy)` | 剥掉代理壳拿原始对象 | 代理对象与原对象 `===` 不等、拦截器有开销 |
+| `markRaw(obj)` | 给对象盖"免代理章"，永远不包 Proxy | 有些对象根本不该被代理（三方类实例、大静态数据） |
+| `proxyMap` | 引擎内部的原对象→代理 WeakMap 缓存 | 防止同一对象被重复代理（内部机制，非公开 API） |
+
+**toRaw 的四个用途 + 两大坑：**
+
+```js
+toRaw(state) === raw        // true，脱壳后就是原来那个对象
+const raw = toRaw(state)
+raw.count = 100             // ⚠️ 坑1：不走 set 拦截器 → 不 trigger → 视图不更新
+                            //    toRaw 是"只读逃生门"——用它读、用它传，别用它写
+toRaw(state).user           // ⚠️ 坑2：只脱一层，user 若已被代理仍是 Proxy
+```
+
+用途：① 跨边界等值判断（`toRaw(a) === b`）；② 性能敏感路径绕开 track 开销；③ 传给三方库（其内部 `===` 缓存判断会被代理对象打乱）；④ 深序列化前的稳妥脱壳。
+
+**markRaw 的典型事故现场（可视化岗位送命题）：**
+
+```js
+// ❌ ECharts/G6 实例放进 reactive/ref 容器
+const state = reactive({ chart: null })
+state.chart = echarts.init(el)
+// 实例被深度代理 → 内部 this 判断/私有字段/缓存全乱 + 上万属性全被代理 → 性能暴跌
+
+// ✅ 解法一：markRaw(state.chart = echarts.init(el)) —— 注意 ref 内部对对象也会调 reactive，markRaw 同样适用
+// ✅ 解法二：组件内普通变量持有，不进响应式系统
+```
+
+细节：markRaw 打 `__v_skip` 标记，`reactive()` 包装前检查到就返回原对象；被标记对象的**整棵子树**都不会被代理（父对象压根不进代理流程）。对象后续变化不触发更新——需要"变了要更新"就别 markRaw，改用 shallow + triggerRef。
+
+**proxyMap 的三个短路行为：**
+
+```js
+const proxyMap = new WeakMap()  // Vue 内部：key=原对象, value=代理
+
+reactive(obj) === reactive(obj)              // true：第二次走缓存
+reactive(reactive(obj)) === reactive(obj)    // true：isProxy 直接返回自身
+state.user; state.user  // 两次访问返回同一个代理：惰性代理靠 proxyMap 不重复包装
+```
+
+同一原始对象全局只有一个代理实例，依赖收集才不会分裂。判定 API（`isRef/isReactive/isProxy`）本质是读对象内部标记（`__v_isRef` 等），不是 instanceof。
 
 **链接引用：** `toRef(obj, key)` / `toRefs(obj)` 把对象属性变成独立 ref 并保持与原对象的连接（解决解构丢失响应式）；`unref` / `isRef` / `toValue`（3.3+）用于 composable 参数归一化——reactive props 解构后的变量传入 composable 时，用 `toValue()` 同时兼容 ref / getter / 普通值。
 
@@ -432,6 +560,30 @@ Block 是一组 vnode 的动态节点的扁平化数组。
 2. 只收集打了 PatchFlag 的动态节点进 block
 3. diff 只对比 block 中的节点
 ```
+
+**结构边界：v-if / v-for 为什么各自成 Block？**
+
+`dynamicChildren` 是「扁平数组」，默认树结构稳定（位置一一对应）。但 v-if 的分支可能整段消失/出现、v-for 的数量和顺序可能变——如果把这些动态节点直接扁平收集进父 Block，两次渲染的数组长度/含义会对不上，diff 就会错位（更新打到错误节点、漏挂载/漏卸载）。
+
+所以编译器遇到 v-if / v-for 时会**切断收集**，让它们各自成一个 Block（结构边界）。父 Block 的 `dynamicChildren` 只把它们当作「一个动态子节点」，不再往下收集：
+
+```
+div（Block）
+ ├─ dynamicChildren: [ h1,  v-if块,  ul片段 ]
+ │
+ │   h1（TEXT 动态）
+ │
+ │   v-if 块（自己一个 Block）
+ │        └─ 内部处理 show 切换：整块挂载/卸载
+ │
+ └─ ul 片段（Fragment Block，KEYED_FRAGMENT）
+          └─ 内部处理 list：走 keyed diff / LIS
+```
+
+- v-if：父 Block 只看到「这个 v-if 块」，分支切换时**整块替换/挂载/卸载**，由 v-if 块保证正确
+- v-for：父 Block 只看到「这个 ul 片段」，增删改顺序交给 keyed diff（LIS）
+
+**一句话：** 「动态收集」的递归到结构边界就停，往里由它自己负责——普通结构可安全扁平化，会变结构（v-if/v-for）必须各自成 Block 才能保证正确性。
 
 ### 2.4 Vue2 双端 Diff vs Vue3 快速 Diff
 
@@ -585,6 +737,50 @@ model.value = 'x'                  // 自动 emit update:modelValue
 - 动态插槽会打 `DYNAMIC_SLOTS (1024)` 标记：父组件更新时必须强制重新渲染插槽内容
 - **面试常问：为什么作用域插槽能拿到子组件数据？** 因为编译后是"父模板作为函数、子组件负责调用"，数据由函数参数传入，本质是 render 函数组合
 
+### 3.7 编译器与 Diff 协同（综合例题）
+
+编译期负责「缩小搜索范围」，运行时 diff 负责「用最小成本完成更新」。用一个例子把两边串起来。
+
+模板：
+
+```html
+<div>
+  <h1>{{ title }}</h1>
+  <p>这是静态描述</p>
+  <ul>
+    <li v-for="item in list" :key="item.id">{{ item.name }}</li>
+  </ul>
+</div>
+```
+
+编译产物（概念示意）：
+
+```js
+const _hoisted_1 = createVNode("p", null, "这是静态描述")  // 静态提升，只建一次
+
+function render(_ctx) {
+  return createBlock("div", null, [
+    createVNode("h1", null, _ctx.title, 1 /* TEXT */),  // 动态文本
+    _hoisted_1,                                          // 静态，复用
+    createBlock(Fragment, null, _ctx.list.map(item =>
+      createVNode("li", { key: item.id }, item.name, 1 /* TEXT */)
+    ), 128 /* KEYED_FRAGMENT */),                        // v-for 片段
+  ])
+}
+```
+
+编译期做的三件事：静态提升（`<p>` 只建一次）、PatchFlag（`h1`/`li` 标 `TEXT=1`）、Block Tree（根 `div` 的 `dynamicChildren = [h1, ul片段]`，静态 `<p>` 不在其中）。
+
+假设更新为 `title = "Hi"`，`list` 从 `[{id:1,'A'},{id:2,'B'},{id:3,'C'}]` 变为 `[{id:1,'A'},{id:3,'C'},{id:2,'B2'}]`，运行时 diff 分三层：
+
+1. **Block 遍历**：只遍历根 Block 的 `dynamicChildren = [h1, ul]`，静态 `<p>` 一步不走。
+2. **单节点 PatchFlag**：`h1` 命中 `TEXT=1` → 只更新文本 `Hello → Hi`，不比较 props/children。
+3. **v-for 片段走 LIS**：keys `[1,2,3] → [1,3,2]`，头同步 `1==1`，中间 `[2,3]→[3,2]`，`newIndexToOldIndexMap=[3,2]`，LIS 保留 id3，只移动 id2 一次；id2 的 `name` 变了（`B→B2`）再命中 `TEXT` 更新文本。
+
+最终 DOM 操作：静态 `<p>` 跳过、`<h1>` 改文本、`<li id=1>` 不动、`<li id=3>` 不动、`<li id=2>` 移动 1 次 + 改文本。
+
+**一句话总结：** 编译期（静态提升 + PatchFlag + Block Tree）缩小 diff 范围，运行时（Block 遍历 + PatchFlag 局部 patch + LIS 最少移动）用最小成本完成更新——两者叠加才是「Vue3 比 Vue2 快」的完整答案。
+
 ---
 
 ## 四、Composition API 核心设计
@@ -737,6 +933,38 @@ count.value++  // 同一个 tick，effect 已在队列中，不会重复添加
 count.value++  // 合并为一次更新
 nextTick(() => { /* 这里拿到最终值 3 */ })
 ```
+
+### 5.3 Vue2 vs Vue3 调度器对比（提升点）
+
+两者都有 `nextTick`，核心思想一样（异步队列 + 去重 + 父先子后），但 Vue3 做了三点升级：
+
+**① nextTick 底层实现**
+
+- Vue2：兼容 IE，用降级链 `Promise → MutationObserver → setImmediate → setTimeout`；
+- Vue3：放弃 IE，直接用原生 `Promise.then`：
+
+```js
+const resolvedPromise = Promise.resolve()
+function nextTick(fn) {
+  return (currentFlushPromise || resolvedPromise).then(fn)
+}
+```
+
+**② 调度粒度：引入 `flush` 选项**
+
+Vue2 只有 `sync: true` 这种简单控制；Vue3 每个 effect 可以指定刷新时机：
+
+| flush | 时机 | 场景 |
+|-------|------|------|
+| `pre`（默认） | 组件渲染前 | watch 默认 |
+| `post` | 组件渲染后（能拿最新 DOM） | `watchEffect({ flush: 'post' })`、操作 DOM |
+| `sync` | 同步执行 | 极少数需立即响应 |
+
+**③ 队列管理更严谨**
+
+`flushJobs` 除了去重、按 id 排序（父先于子），还多了**递归保护**（flush 期间新增 job 的处理）；响应式底层从 watcher 换成 effect，调度更轻量。
+
+**一句话：** nextTick 的概念和用途没变，变的是「实现（原生 Promise）、粒度（flush 时机）、队列（更严谨）」。
 
 ---
 
@@ -956,6 +1184,18 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 - **v-model:title = `title` prop + `update:title` 事件**；`defineModel('title')` 只是把两者封装成可读写 ref，编译后仍是 prop + emit
 - **index 作 key 的经典现场**：头部插入时，新 index 0 复用旧 index 0 的组件实例，输入框残留旧数据状态，形成"张冠李戴"
 
+### 2026-08-23 模拟面试暴露的盲区（第 9 轮）
+
+- **"劫持"≠"依赖收集"（术语错误）**：Vue2 初始化时递归做的是劫持（给属性加 getter/setter），是纯初始化开销；依赖收集发生在运行时读取属性、触发 getter 之后。未读取的属性没有依赖记录。别把初始化开销说成"都进了依赖池"
+- **惰性代理的时机**：`reactive()` 执行时只代理最外层对象；嵌套对象在被 get 访问到的那一刻才递归包装（配合 proxyMap 缓存防重复）。这是 Vue3 相对 Vue2 性能收益的最大来源——未被视图消费的深层数据零响应式开销
+- **dep 里存的是 effect，不是 DOM 元素**：effect = 渲染函数 / computed 求值 / watch 回调。链路是属性变化 → trigger 找 effect → 执行 effect → 渲染 effect 间接产出 vnode → patch。effect ≠ 元素
+- **WeakMap 回收的是数据对象（target），不是视图元素**：组件销毁 → target 失去外部强引用 → targetMap 弱引用不阻止回收 → 整条 depsMap→dep 链失去入口被 GC。普通 Map 会反向"续命"造成内存泄漏
+- **Proxy 的局限 + Vue3 的补救**（2026 美团真题）：基本类型不能代理 → `ref`；代理对象与原对象 `===` 不等 → `toRaw` + proxyMap 缓存；**Map/Set 的方法调用（如 `map.set`）走不到 get/set 拦截** → Vue3 在 get 拦截器里检测集合方法并返回包装版本（内部 `toRaw` 操作原对象 + 手动 track/trigger）——最后这条是高级分水岭
+- **PatchFlag / BlockTree 极简记忆（30 秒版）**：编译器像提前预习的考生——永远不变的节点（静态提升）vnode 只造一次、patch 直接跳过（HOISTED）；会变的节点列成名单（dynamicChildren），更新时只看名单；名单上每人一张"病历卡"（PatchFlag：TEXT=1 / CLASS=2 / STYLE=4），patch 只查卡上那一项。v-if/v-for 是结构边界，产生新 block（BlockTree）保证正确性
+- **watch 竞态的内建解法是 onCleanup**（回调第三个参数 / 3.5 全局 onWatcherCleanup）：注册的清理函数在下一次回调触发前、watcher 停止（含组件卸载）时自动执行。防抖的 clearTimeout + 竞态的 AbortController 都挂在这上面，三个需求（防抖/竞态/卸载清理）一个钩子全解决。loading 标志和 old/new 比对都**不能**解决竞态——竞态是响应到达顺序问题。备用解法：闭包版本号 token（`if (id !== requestId) return`，旧响应自我作废）
+- **defineModel 的"穿透"是一次事件往返**：set → emit('update:modelValue') → 父组件更新自己的变量 → 新 prop 流回子组件 → get 读到新值（内部维护 local value 兜底 prop 往返延迟）。单向数据流没有被打破——子组件从未直接改父状态
+- **toRaw/markRaw/proxyMap 详解已补进 1.7 节**：核心记忆点——toRaw 是只读逃生门（改 raw 不触发更新、只脱一层）；ECharts/G6 实例必须 markRaw 或普通变量持有（ref 内部对对象也会调 reactive）；proxyMap 保证同一原对象全局唯一代理（`reactive(reactive(x)) === reactive(x)`）
+
 ---
 
 ## 十、交互式 Demo
@@ -973,3 +1213,9 @@ nextTick(() => { /* 这里拿到最终值 3 */ })
 - 掘金：Vue 3.6 还没正式发布，但前端的方向已经被它定下来了（2026-07）— https://juejin.cn/post/7660079523232399402
 - CSDN：大厂前端面试最新整理笔记（2026-02，Vue 编译/性能优化/Modal 设计等）— https://blog.csdn.net/WYiQIU/article/details/157652339
 - 三年前端面试复盘：字节阿里美团高频题与手写源码解析（2026-04）— https://zeeklog.com/2026chun-zhao-san-nian-qian-duan-xie-lei-mian-jing-na-xia-zi-jie-a-li-mei-tuan-offer-zhe-xie-gao-pin-ti-ni-bi-xu-zhang-wo-fu-shou-xie-yuan-ma-9
+- 掘金：Vue3 模板编译优化——Patch Flags 与 Block Tree 深度解析（2025-09）— https://juejin.cn/post/7555053579033624618
+- php.cn：Vue3 是如何处理动态节点的？深入理解 Block 收集动态子代的机制（2026-04）— https://www.php.cn/faq/2323135.html
+- 掘金/搜狐：Vue2 到 Vue3——性能飞跃与 Diff 算法革命（2026-03/04）— https://jishuzhan.net/article/2039234008226729985
+- php.cn：动态节点标记 Patch Flags——Diff 算法的加速钥匙（2026-07）— https://www.php.cn/faq/2833002.html
+- php.cn：Vue 渲染流程中异步任务的调度优先级（2026-07）— https://www.php.cn/faq/2859386.html
+- 掘金：vue2 和 vue3 的 nextTick 实现的不同方式 — https://juejin.cn/post/6888227890618433549

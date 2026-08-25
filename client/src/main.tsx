@@ -6,9 +6,11 @@ import "./index.css";
 import { RouterProvider } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { Provider } from "react-redux";
 import { router } from "./router";
 import { queryClient } from "./lib/queryClient";
 import { userConfigContext } from "./utils";
+import { shopStore } from "./features/shop/store";
 
 const userConfig = {
   name: "Vibe Coding",
@@ -22,10 +24,12 @@ createRoot(document.getElementById("root")!).render(
       {/* App 提供 message/notification 上下文，配合 App.useApp() 使用 */}
       <AntApp>
         <QueryClientProvider client={queryClient}>
-          <userConfigContext.Provider value={userConfig}>
-            {/* 开发工具：可视化查看缓存内容/状态，调试学习利器（只影响开发环境） */}
-            <RouterProvider router={router} />
-          </userConfigContext.Provider>
+          <Provider store={shopStore}>
+            <userConfigContext.Provider value={userConfig}>
+              {/* 开发工具：可视化查看缓存内容/状态，调试学习利器（只影响开发环境） */}
+              <RouterProvider router={router} />
+            </userConfigContext.Provider>
+          </Provider>
           {/* 开发工具：可视化查看缓存内容/状态，调试学习利器（只影响开发环境） */}
           <ReactQueryDevtools initialIsOpen={false} />
         </QueryClientProvider>

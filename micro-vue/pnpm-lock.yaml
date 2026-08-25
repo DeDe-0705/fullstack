@@ -8,12 +8,21 @@ importers:
 
   .:
     dependencies:
+      '@vxe-ui/core':
+        specifier: ^4.4.20
+        version: 4.4.20(vue@3.5.40(typescript@6.0.3))
       markstream-vue:
         specifier: ^1.0.8
         version: 1.0.8(vue@3.5.40(typescript@6.0.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.40(typescript@6.0.3)
+      vxe-table:
+        specifier: ^4.21.1
+        version: 4.21.1
+      xe-utils:
+        specifier: ^4.0.12
+        version: 4.0.12
     devDependencies:
       '@vitejs/plugin-vue':
         specifier: ^6.0.1
@@ -212,12 +221,20 @@ packages:
   '@vue/shared@3.5.40':
     resolution: {integrity: sha512-WxnBtruIqOoV3rA4jeKDWzrYI5h7Cp4+pjwDi8kWGHz+IslhiN+wguLVVhtv2l8VoU02rzDCVfDjgCl1lNpZVg==}
 
+  '@vxe-ui/core@4.4.20':
+    resolution: {integrity: sha512-PYsssySS4cK3M2nahIRGcIRjQvnsDA/AB9Ie1fu5zAFRaUGTpyHh62sSRi1qNSsqpDiABEYquOSrexZ/NG6akw==}
+    peerDependencies:
+      vue: ^3.2.0
+
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  dom-zindex@1.0.7:
+    resolution: {integrity: sha512-cKU/h8v8IPBgdZOTPbPmq3Ib+Ac5C+kKoh9I4LbGR9BM3GwbmB16KYWKJcj5M2BavnA66EbgYzxYDLd1IytnlQ==}
 
   entities@7.0.1:
     resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
@@ -483,6 +500,12 @@ packages:
       typescript:
         optional: true
 
+  vxe-table@4.21.1:
+    resolution: {integrity: sha512-O+hN99rySQca+lvzR0ZaqPxzFSKfaRX87AcrUDb/OqWBzGS4lOm3j1EFnpseDXCvJ5VxIIOhFOBahTZ2V/ccYA==}
+
+  xe-utils@4.0.12:
+    resolution: {integrity: sha512-4y2OXEVlXHoBMSyzdAcXDM9oyb8EL9U4LIEq642JO0liULVpC9U5aEiVv2xbS9hhoebYCMdZZYASqh/7H5Wd0Q==}
+
 snapshots:
 
   '@babel/helper-string-parser@7.29.7': {}
@@ -654,9 +677,17 @@ snapshots:
 
   '@vue/shared@3.5.40': {}
 
+  '@vxe-ui/core@4.4.20(vue@3.5.40(typescript@6.0.3))':
+    dependencies:
+      dom-zindex: 1.0.7
+      vue: 3.5.40(typescript@6.0.3)
+      xe-utils: 4.0.12
+
   csstype@3.2.3: {}
 
   detect-libc@2.1.2: {}
+
+  dom-zindex@1.0.7: {}
 
   entities@7.0.1: {}
 
@@ -840,3 +871,7 @@ snapshots:
       '@vue/shared': 3.5.40
     optionalDependencies:
       typescript: 6.0.3
+
+  vxe-table@4.21.1: {}
+
+  xe-utils@4.0.12: {}

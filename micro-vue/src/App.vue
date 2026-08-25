@@ -4,9 +4,11 @@ import MarkdownRender from "markstream-vue";
 import "markstream-vue/index.css";
 import { fullMarkdown } from "./sample";
 import GlobalModal from "./components/GlobalModal.vue";
+import VxeTableDemo from "./components/VxeTableDemo.vue";
 
 const content = ref("");
 const done = ref(false);
+const view = ref("vxe");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 let cursor = 0;
@@ -129,22 +131,36 @@ onBeforeUnmount(() => clearInterval(timer));
 
 <template>
   <div class="page">
-    <header class="header">
-      <h1>Markdown 渲染</h1>
-      <p>Vue 3 子应用 · markstream-vue 流式渲染</p>
-      <button class="replay" type="button" @click="startStream">
-        重新播放
+    <nav class="nav">
+      <button type="button" :class="{ active: view === 'markdown' }" @click="view = 'markdown'">
+        Markdown 渲染
       </button>
-    </header>
-    <main class="content">
-      <MarkdownRender
-        mode="chat"
-        :content="content"
-        code-renderer="monaco"
-        :final="done"
-        :fade="false"
-      />
-    </main>
+      <button type="button" :class="{ active: view === 'vxe' }" @click="view = 'vxe'">
+        VxeTable 虚拟滚动
+      </button>
+    </nav>
+
+    <template v-if="view === 'markdown'">
+      <header class="header">
+        <h1>Markdown 渲染</h1>
+        <p>Vue 3 子应用 · markstream-vue 流式渲染</p>
+        <button class="replay" type="button" @click="startStream">
+          重新播放
+        </button>
+      </header>
+      <main class="content">
+        <MarkdownRender
+          mode="chat"
+          :content="content"
+          code-renderer="monaco"
+          :final="done"
+          :fade="false"
+        />
+      </main>
+    </template>
+
+    <VxeTableDemo v-else />
+
     <GlobalModal></GlobalModal>
   </div>
 </template>
@@ -156,6 +172,27 @@ onBeforeUnmount(() => clearInterval(timer));
   height: 100%;
   overflow: auto;
   box-sizing: border-box;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.nav button {
+  padding: 6px 14px;
+  border: 1px solid #d0d3d6;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.nav button.active {
+  border-color: #3370ff;
+  color: #3370ff;
+  background: #f0f5ff;
 }
 
 .header {

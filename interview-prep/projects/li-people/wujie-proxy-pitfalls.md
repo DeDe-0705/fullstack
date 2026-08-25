@@ -58,6 +58,30 @@ class ElSelect {
 }
 ```
 
+### 1.2.1 精确定位：popper.js 2.0 + visualViewport 的偏移
+
+element-plus（以及大量 UI 库）底层用的是 **popper.js 2.0**，它定位弹层分三步：
+
+1. `getBoundingClientRect()` 拿 reference（触发元素）相对 viewport 的位置；
+2. `getScrollParents()` 找所有可滚动祖先，累加 `scrollTop/scrollLeft` 修正；
+3. 最终以 `window.visualViewport` 为基准定位。
+
+子应用 DOM 挂在 **ShadowRoot** 里时，滚动发生在 ShadowRoot 内部容器、而不是 window；popper 沿 `parentNode` 向上找滚动祖先时，到 shadow boundary 没正确跨到 `host`（或算不到 shadow 内部那层滚动量），漏掉了这层滚动 → 定位偏移。
+
+**解决方案：**
+
+1. `body { position: relative }`（最常用）：让 body 成为定位上下文（offset parent），shadow 内部滚动被「相对 body」抵消。
+2. 主应用用 `cssBeforeLoaders` 注入，子应用零改动：
+
+```js
+cssBeforeLoaders: [
+  { callback: () => 'body { position: relative; }' }
+]
+```
+
+3. 组件设 `:teleported="false"`（副作用：可能被 `overflow: hidden` 裁切）。
+4. 升级 element-plus（新版底层换成 Floating UI，对 Shadow DOM 支持更好）。
+
 ### 1.3 典型问题：ECharts 事件绑定异常
 
 ```javascript
@@ -434,6 +458,7 @@ WujieVue.setupApp({
 |---------|------|---------|
 | offsetParent / parentNode | 返回真实 DOM 的父元素 | 使用 getRootNode() 或 composedPath() |
 | getBoundingClientRect | 返回真实 DOM 的位置 | 手动计算 ShadowRoot 偏移，或使用 Wujie 工具函数 |
+| popper.js 2.0 定位（下拉/气泡） | 漏算 ShadowRoot 内部滚动（以 visualViewport 为基准） | body position:relative / cssBeforeLoaders 注入 |
 | ResizeObserver | 监听真实 DOM | 使用 MutationObserver 替代，或通过 getRootNode() 判断 |
 | event.target | 返回真实 DOM 的元素 | 使用 composedPath() 获取真实 target |
 | 第三方库兼容 | 直接操作真实 DOM | 通过 jsBeforeLoaders 注入修复代码 |
