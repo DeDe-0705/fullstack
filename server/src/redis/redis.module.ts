@@ -19,6 +19,9 @@ export { REDIS_CLIENT };
           // 连接失败不重试风暴：缓存是加速器不是依赖，挂了要能降级回 DB
           maxRetriesPerRequest: 1,
           retryStrategy: (times) => Math.min(times * 200, 2000),
+          // 断线时命令立即报错而不是排队等重连：缓存命令挂住会拖慢整个请求，
+          // 快速失败才能配合熔断器及时降级
+          enableOfflineQueue: false,
           lazyConnect: false,
         });
         client.on('error', (err) => {

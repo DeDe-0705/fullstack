@@ -242,6 +242,29 @@ async handleLockReleaseCheck(msg: LockReleaseMessage) {
 
 **实测踩到的坑（高价值）**：全局 `APP_GUARD`（TokenGuard）和 `APP_INTERCEPTOR`（ResponseInterceptor）会对 RabbitMQ 消费者生效，而 RPC 上下文没有 HTTP request/response，`switchToHttp().getRequest()` 返回 undefined 直接抛异常 → 消息处理失败无限重投。**解法：守卫和拦截器开头判断 `context.getType() !== 'http'` 直接放行**。这是 NestJS 接 MQ 的经典暗坑。
 
+### 3.2 分布式锁的另一个高频用途：定时任务多实例去重（本项目已实现）
+
+**场景**：`@nestjs/schedule` 的 `@Cron` 定时任务在多实例部署时，**每个实例都会到点触发**，任务重复执行 N 次（N=实例数）。
+
+**解法**：执行前抢 Redis 分布式锁，没抢到的实例直接跳过（`server/src/tasks/tasks.service.ts`）：
+
+```ts
+@Cron(CronExpression.EVERY_30_SECONDS)
+async collectConversationStats() {
+  const token = await this.lockService.acquire('lock:cron:stats', 60_000);
+  if (!token) return; // 其他实例在执行，跳过
+  try { /* 干活 */ } finally { await this.lockService.release(lockKey, token); }
+}
+```
+
+**实测**：双实例跑 30s 周期的统计任务，每一轮恰好一个实例执行、另一个跳过，且执行权在实例间交替（谁抢到谁干）。
+
+**追问准备**：
+
+- **锁 TTL 怎么设**：只需覆盖任务最长执行时间，崩了也能自愈；任务本身也要幂等，防"锁过期后两个实例同时执行"的窗口
+- **和分布式调度框架的区别**：xxl-job / ElasticJob 是调度中心主动派单（天然单点执行），Redis 锁是各实例自治抢锁——前者适合复杂调度，后者零依赖适合简单任务
+- **K8s 环境更简单**：直接用 CronJob 资源拉起独立 Pod 执行，根本不在应用实例里跑 cron
+
 ---
 
 ## 4. 场景题：接口限流（Guard + Redis）
@@ -321,6 +344,35 @@ export class DbSemaphore {
 - **ConversationService 所有 DB 访问统一过 `this.db(fn)`**，写突发（save + update + 查 owner 三条 SQL）共享一次名额申请；
 - 实测：`DB_MAX_CONCURRENCY=3` 下 20 并发打到空缓存，日志出现 `并发已满(3)，排队中`，请求全部正常返回；单元验证超时路径能正确快速失败。
 
+### 6.2 熔断器（本项目已实现，server/src/common/circuit-breaker.ts）
+
+限流和降级之外的第三层防护：**发现下游持续故障，主动暂停调用一段时间**。
+
+```
+CLOSED(正常) → 连续失败达阈值 → OPEN(熔断，请求直接拒绝，不碰下游)
+  → 冷却结束 → HALF_OPEN(放行探针) → 成功回 CLOSED / 失败重新 OPEN
+```
+
+三者的分工（面试必考区分度）：
+
+| | 限流（DbSemaphore） | 熔断（CircuitBreaker） | 降级（try/catch） |
+|---|---|---|---|
+| 触发 | 无条件，正常也生效 | 下游持续故障才触发 | 下游故障时 |
+| 目的 | 预防过载 | 给下游恢复时间 + 省自己等待开销 | 保住核心功能 |
+| 动作 | 排队/快速失败 | 直接拒绝，冷却后探针试探 | 换备选方案执行 |
+
+本项目两把熔断器：
+
+- **Redis 熔断**（阈值 3 次 / 冷却 10s）：Redis 挂了后请求跳过缓存直连 DB——没有熔断时每个请求都要先等 Redis 连接失败，白白加延迟
+- **DB 熔断**（阈值 5 次 / 冷却 10s）：MySQL 持续故障时请求 2ms 内返回「50301 数据库熔断中」，不再排队等 3s 超时
+
+两个关键设计细节：
+
+1. **只有基础设施故障才计入熔断**（连接拒绝/超时/并发池排队超时）；SQL 语义错误（唯一键冲突）是业务失败，不代表 DB 病了
+2. **熔断生效的前提是快速失败**：ioredis 必须配 `enableOfflineQueue: false`，否则断线命令排队等重连，熔断统计到的不是失败而是「挂住」
+
+**实测**：停 Redis → 3 次失败后熔断打开，请求从 16ms 降到 4ms（跳过 Redis）；停 MySQL → 5 次失败后请求 2ms 秒回 50301；重启后冷却 10s 半开探针成功自动恢复。
+
 ---
 
 ## 7. 其他高频小场景（一句话方案 + 数据结构）
@@ -338,6 +390,6 @@ export class DbSemaphore {
 
 ## 8. 面试话术模板（被问"你项目里 Redis 怎么用的"）
 
-> "我在 NestJS 里用 `@Global()` 模块全局注入 ioredis 客户端，会话层做了 cache-aside 旁路缓存：列表、历史、详情三个热点读接口缓存默认第一页，TTL 60 秒加随机抖动防雪崩；写路径上先更 DB 再删对应 key。设计上我假设 Redis 随时会挂——所有缓存操作都有降级路径直连 DB，DB 侧再用「连接池 + 并发信号量」双层保护：信号量挡洪峰、排队超时快速失败，实测停掉 Redis 服务接口功能不受影响。分页只缓存第一页是刻意的取舍：这样失效时只需 DEL 固定 key，不用 SCAN；要缓存全部分页就得换版本号 key 方案。一致性上我接受秒级最终一致，靠 TTL 兜底，因为会话场景对实时性不敏感；如果做库存这类场景我会改成延迟双删 + 消息队列重试。"
+> "我在 NestJS 里用 `@Global()` 模块全局注入 ioredis 客户端，会话层做了 cache-aside 旁路缓存：列表、历史、详情三个热点读接口缓存默认第一页，TTL 60 秒加随机抖动防雪崩；写路径上先更 DB 再删对应 key。设计上我假设 Redis 随时会挂——所有缓存操作都有降级路径直连 DB，DB 侧再用「连接池 + 并发信号量 + 熔断器」三层保护：信号量挡洪峰、排队超时快速失败，下游持续故障时熔断器直接短路请求，冷却后半开探针自动恢复，实测停掉 Redis 或 MySQL 服务行为都符合预期。分页只缓存第一页是刻意的取舍：这样失效时只需 DEL 固定 key，不用 SCAN；要缓存全部分页就得换版本号 key 方案。一致性上我接受秒级最终一致，靠 TTL 兜底，因为会话场景对实时性不敏感；如果做库存这类场景我会改成延迟双删 + 消息队列重试。"
 
 这段话覆盖了：接入方式、缓存模式、三大问题、一致性、降级、取舍理由、演进方向——面试官的追问基本都在射程内。

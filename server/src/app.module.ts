@@ -1,10 +1,12 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './redis/redis.module';
 import { MqModule } from './mq/mq.module';
+import { TasksModule } from './tasks/tasks.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { ToolsModule } from './tools/tools.module';
 import { AgentModule } from './agent/agent.module';
@@ -15,7 +17,17 @@ import { LoggerMiddleware } from './middleware/logger.middleware';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 
 @Module({
-  imports: [DatabaseModule, RedisModule, MqModule, ConversationModule, ToolsModule, AgentModule, McpModule],
+  imports: [
+    ScheduleModule.forRoot(), // 启用 @Cron 装饰器扫描
+    DatabaseModule,
+    RedisModule,
+    MqModule,
+    TasksModule,
+    ConversationModule,
+    ToolsModule,
+    AgentModule,
+    McpModule,
+  ],
   controllers: [AppController],
   providers: [
     AppService,

@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { DbSemaphore, DbConcurrencyLimitError } from '../database/db-semaphore';
+import { CircuitBreaker } from '../common/circuit-breaker';
 import { User } from '../database/entities/user.entity';
 import { Conversation } from '../database/entities/conversation.entity';
 import { Message } from '../database/entities/message.entity';
@@ -30,6 +31,11 @@ const cacheKey = {
 
 @Injectable()
 export class ConversationService {
+  // Redis 熔断：挂了之后跳过缓存直连 DB，省掉每次连接失败的开销；
+  // DB 熔断：持续故障时立即失败，不再排队等 3s（与 DbSemaphore 的快速失败互补）
+  private readonly redisBreaker = new CircuitBreaker('redis', 3, 10_000);
+  private readonly dbBreaker = new CircuitBreaker('mysql', 5, 10_000);
+
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Conversation)
@@ -39,12 +45,24 @@ export class ConversationService {
     private readonly dbSemaphore: DbSemaphore,
   ) { }
 
-  // 所有 DB 访问统一过并发池：Redis 失效/宕机导致回源洪峰时，超出的请求排队等待，
-  // 排队超时会抛 DbConcurrencyLimitError 快速失败，而不是无限堆积压垮 MySQL
+  // 只有「基础设施故障」才算熔断依据；SQL 语义错误（唯一键冲突等）是业务失败，不代表 DB 病了
+  private isDbInfraError (err: unknown): boolean {
+    if (err instanceof DbConcurrencyLimitError) return true;
+    const code = (err as { code?: string })?.code ?? '';
+    return ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'PROTOCOL_CONNECTION_LOST', 'EPIPE'].includes(code);
+  }
+
+  // 所有 DB 访问统一过「熔断 + 并发池」：熔断挡持续故障，并发池挡瞬时洪峰
   private async db<T> (fn: () => Promise<T>): Promise<T> {
+    if (!this.dbBreaker.canPass()) {
+      throw new BusinessException(50301, '数据库熔断中，请稍后重试');
+    }
     try {
-      return await this.dbSemaphore.run(fn);
+      const result = await this.dbSemaphore.run(fn);
+      this.dbBreaker.onSuccess();
+      return result;
     } catch (err) {
+      if (this.isDbInfraError(err)) this.dbBreaker.onFailure();
       if (err instanceof DbConcurrencyLimitError) {
         throw new BusinessException(50300, err.message);
       }
@@ -55,28 +73,35 @@ export class ConversationService {
   // 缓存只加速默认第一页的读请求（覆盖 90%+ 场景）；带自定义分页参数的直接回源 DB。
   // 这样失效时只需 DEL 固定 key，避免 SCAN 全库清缓存。
   private async cacheGet<T> (key: string): Promise<T | null> {
+    if (!this.redisBreaker.canPass()) return null; // 熔断中：跳过 Redis 直连 DB
     try {
       const raw = await this.redis.get(key);
+      this.redisBreaker.onSuccess();
       return raw ? (JSON.parse(raw) as T) : null;
     } catch {
+      this.redisBreaker.onFailure();
       return null; // Redis 故障降级为直连 DB，缓存绝不能成为单点依赖
     }
   }
 
   private async cacheSet (key: string, value: unknown): Promise<void> {
+    if (!this.redisBreaker.canPass()) return;
     try {
       const ttl = CACHE_TTL_SECONDS + Math.floor(Math.random() * 10);
       await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
+      this.redisBreaker.onSuccess();
     } catch {
-      /* 写缓存失败直接跳过 */
+      this.redisBreaker.onFailure();
     }
   }
 
   private async cacheDel (...keys: string[]): Promise<void> {
+    if (!this.redisBreaker.canPass()) return;
     try {
       if (keys.length > 0) await this.redis.del(...keys);
+      this.redisBreaker.onSuccess();
     } catch {
-      /* 清缓存失败时靠 TTL 兜底过期 */
+      this.redisBreaker.onFailure();
     }
   }
 

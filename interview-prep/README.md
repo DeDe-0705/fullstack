@@ -48,6 +48,7 @@
 - [TypeORM读写优化与幂等方案](./TypeORM读写优化与幂等方案.md) — NestJS+TypeORM场景：读优化(索引/缓存/读写分离/N+1/深分页)、写幂等(唯一约束/orIgnore/幂等键/乐观锁/MQ去重)、经典场景与面试话术
 - [Redis高频考点大全](./Redis高频考点大全.md) — 单线程模型与底层数据结构、持久化RDB/AOF、过期删除与内存淘汰、缓存穿透/击穿/雪崩、缓存一致性、主从/哨兵/集群、分布式锁(Redisson看门狗/RedLock)、大key热key、Redis 8新特性
 - [分布式锁-Redis与DB对比](./分布式锁-Redis与DB对比.md) — DB锁(行锁/事务/唯一约束/乐观锁) vs Redis锁(SET NX EX/看门狗/RedLock)、三种实现对比、场景判断口诀、秒杀三段式组合拳
+- [缓存雪崩防护与并发控制](./缓存雪崩防护与并发控制.md) — 雪崩两种场景、限流/熔断/降级本质区别、限流算法(令牌桶/漏桶/滑动窗口)、削峰vs限流(BullMQ依赖Redis的局限)、拒vs排核心洞察、Redis挂了时的防护组合
 - [NestJS与Redis实战场景题](./NestJS与Redis实战场景题.md) — 基于 server/ 实战：ioredis全局模块接入、cache-aside代码走读、穿透/击穿/雪崩/一致性/分布式锁/MQ延迟兜底释放/限流/DB并发池/降级场景题含具体代码方案、全局守卫拦截MQ消费者坑、面试话术模板
 - [MyBatis基础](./MyBatis基础.md) — MyBatis vs MySQL本质区别、半自动ORM、MyBatis vs JPA选型、#{}与${}、一级二级缓存、动态SQL
 - [Java分层架构](./Java分层架构.md) — Controller/Service/Mapper分层、PO/DTO/VO/BO/Entity各种「O」的区别、完整数据流转、为什么分层
