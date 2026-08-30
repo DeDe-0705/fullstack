@@ -781,6 +781,27 @@ function render(_ctx) {
 
 **一句话总结：** 编译期（静态提升 + PatchFlag + Block Tree）缩小 diff 范围，运行时（Block 遍历 + PatchFlag 局部 patch + LIS 最少移动）用最小成本完成更新——两者叠加才是「Vue3 比 Vue2 快」的完整答案。
 
+**编译期 vs 运行时（完整流程，避免混淆）：**
+
+```
+编译期（构建时，只做一次）：
+  ① 静态提升（hoisted）——静态 vnode 只建一次
+  ② 打 PatchFlag——标记动态节点（TEXT/CLASS/STYLE...）
+  ③ 生成 Block Tree——dynamicChildren 只收集动态节点
+
+运行时（set 触发后）：
+  ① trigger → 通知依赖该数据的「渲染 effect」
+  ② 只重新执行依赖它的组件（精准到组件，不是全量）
+  ③ 组件渲染时利用编译产物：
+     - 静态节点复用（提升的 vnode）
+     - 动态节点按 PatchFlag 只 patch 对应部分
+     - diff 只遍历 dynamicChildren，跳过静态内容
+```
+
+**易错纠正：** 编译不是 set 触发后「运行时」做的，是「构建时」做的；set 触发后是「利用编译产物」，不是「重新编译」。
+
+**精准粒度：** Vue 精准到「组件」重新渲染，组件内部靠 Block Tree + PatchFlag 跳过静态、只 diff 动态——两层优化叠加。
+
 ---
 
 ## 四、Composition API 核心设计

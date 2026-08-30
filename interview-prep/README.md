@@ -20,14 +20,19 @@
 - [React面试考点地图](./React面试考点地图.md) — 大厂评判标准、七层考点地图、高频必考清单、自测清单
 - [React一周速成计划](./React一周速成计划.md) — 7 天冲刺时间表：Vue→React 心智迁移、每日必读+实操 Demo+自测题、React 必考 12 题
 - [React场景实战-Router与状态管理](./React场景实战-Router与状态管理.md) — 电商闭环实操：Router(URL状态/loader预取) + TanStack Query(服务端状态) + Zustand(客户端状态) + Redux(流程状态机)，含选型对比与面试话术
+- [React场景题-渲染性能](./React场景题-渲染性能.md) — 大数据渲染(虚拟列表/分批/Canvas/懒加载) + 时间切片(useTransition/useDeferredValue) 两类场景题、完整方案与面试话术
+- [React场景题大全](./React场景题大全.md) — 10 大类高频场景全覆盖：渲染/状态设计/表单/搜索/列表/数据请求/错误边界/路由权限/SSR/组件设计，每场景含方案与面试话术
+- [React Profiler 性能定位](./React Profiler 性能定位.md) — Profiler 火焰图/Ranked/Why did this render 三个视图、self time vs total time、四步定位流程、配合 Chrome Performance
 - [TanStack Query核心](./TanStackQuery核心.md) — 服务端状态管理、useQuery读/useMutation写、生命周期、invalidateQueries缓存失效、乐观更新与回滚
 - [Redux核心](./Redux核心.md) — 三大原则、单向数据流、Redux Toolkit(createSlice/configureStore)、createAsyncThunk三态、thunk vs saga、Redux vs Zustand
+- [Zustand与ReactRouter用法](./Zustand与ReactRouter用法.md) — Zustand状态管理与中间件(persist/immer/subscribeWithSelector/自定义)、React Router v7数据路由(loader/Outlet/useMatches/handle)
 
 ## 三、工程与性能
 
 - [前端工程化](./前端工程化.md) — Webpack/Vite原理、HMR、TreeShaking、CI/CD、组件库建设、Monorepo
 - [前端工程化-组件库实战](./前端工程化-组件库实战.md) — ui-kit 实操：组件库打包、git tag、CI/CD、npm 发布全链路（2026-08）
 - [性能优化体系](./性能优化体系.md) — 网络/构建/渲染/运行时四层优化、Core Web Vitals、虚拟列表
+- [前端性能监控与线上定位](./前端性能监控与线上定位.md) — 埋点平台指标观测、RUM 指标体系、Navigation/Resource Timing 拆段、iOS 偶发慢多维归因、线上排障话术
 - [Docker与K8s部署](./Docker与K8s部署.md) — Docker镜像/分层/底层原理(namespace+cgroups)、Dockerfile多阶段构建、Compose编排、K8s架构与部署、CI/CD/GitOps
 
 - [SSE流式处理与AI前端](./SSE流式处理与AI前端.md) — 2026大厂新增独立考点：SSE vs WebSocket、Fetch+ReadableStream、粘包半包、断线重连+指数退避、流式Markdown增量渲染、打字机性能优化
@@ -37,6 +42,7 @@
 - [Node.js与NestJS](./Node.js与NestJS.md) — Node 事件循环/模块系统/Stream + NestJS 基础架构、依赖注入、横切关注点、项目实战话术
 - [NestJS面试考点大全](./NestJS面试考点大全.md) — 2026 大厂版：DI 原理/AOP 生命周期/ORM 选型/JWT 鉴权/微服务 gRPC/性能高并发/场景题全覆盖
 - [Elasticsearch基础](./Elasticsearch基础.md) — ES是什么、倒排索引、Index/Document/Shard/Replica核心概念、ES vs MySQL选型、使用场景与高频考点
+- [MySQL高频考点与手写SQL](./MySQL高频考点与手写SQL.md) — B+树/联合索引/回表覆盖索引、事务MVCC锁、EXPLAIN慢查询，10道手写SQL含答案
 - [MyBatis基础](./MyBatis基础.md) — MyBatis vs MySQL本质区别、半自动ORM、MyBatis vs JPA选型、#{}与${}、一级二级缓存、动态SQL
 - [Java分层架构](./Java分层架构.md) — Controller/Service/Mapper分层、PO/DTO/VO/BO/Entity各种「O」的区别、完整数据流转、为什么分层
 - [微前端专题](./微前端专题.md) — 概念与价值、qiankun/无界/Micro-app/Module Federation对比、无界实战、通信/鉴权/路由方案
@@ -49,6 +55,7 @@
 - [项目复盘与面试话术](./项目复盘与面试话术.md) — Li People/理想同事/组织信息管理/出入预约 四大项目STAR话术、系统设计题
 - [React 代码实践复盘](./React代码实践复盘.md) — 通过 client 代码学习 React 核心机制（Hooks 闭包陷阱、setState、useEffect、自定义 Hook、性能优化、React 19），记录踩坑与面试话术
 - [C端项目场景题 — Vue & React](./C端场景题-Vue与React.md) — 2026 大厂版：电商/搜索/购物车/秒杀/Feed/短视频/IM/地图/权限/表单/上传/SSR/AI 场景题与双框架落地点
+- [二面备考待办清单](./二面备考待办清单.md) — 20 轮模拟面试暴露的盲区，按模块与优先级整理，逐项勾选
 
 ---
 

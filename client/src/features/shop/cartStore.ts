@@ -51,6 +51,6 @@ export const useCartStore = create<CartState>()(
 )
 
 // 派生数据用普通函数计算，不塞进 store，避免「一份数据多处存」导致不一致
-export function selectCartCount(items: CartItem[]) {
+export function selectCartCount (items: CartItem[]) {
   return items.reduce((sum, i) => sum + i.quantity, 0)
 }

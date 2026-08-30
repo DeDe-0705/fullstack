@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>手写 Mini React：虚拟 DOM / diff / useState / useEffect</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 24px; background: #f5f7fa; color: #1f2937; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    .sub { color: #6b7280; font-size: 14px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
+    .card h2 { font-size: 16px; margin: 0 0 12px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; font-size: 12px; overflow: auto; max-height: 360px; line-height: 1.5; }
+    button { cursor: pointer; border: none; border-radius: 6px; padding: 8px 14px; background: #2563eb; color: #fff; font-size: 14px; margin-right: 8px; }
+    button:hover { background: #1d4ed8; }
+    input { padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; width: 240px; }
+    .hint { color: #6b7280; font-size: 12px; margin-top: 12px; line-height: 1.7; }
+    code { background: #eef2ff; color: #4338ca; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>手写 Mini React</h1>
+  <div class="sub">下面这个 Counter 不是用 React 渲染的，而是用页面底部「手写」的 <code>createElement</code> / <code>render</code> / <code>diff</code> / <code>useState</code> / <code>useEffect</code> 渲染出来的。</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>① 运行效果（点按钮感受 setState → re-render）</h2>
+      <div id="root"></div>
+    </div>
+    <div class="card">
+      <h2>② 虚拟 DOM（vnode 树）</h2>
+      <pre id="vnode">加载中...</pre>
+    </div>
+    <div class="card">
+      <h2>③ diff / hook 日志</h2>
+      <pre id="log"></pre>
+    </div>
+    <div class="card">
+      <h2>④ 手写实现（核心代码）</h2>
+      <pre id="source"></pre>
+    </div>
+  </div>
+
+  <div class="hint">
+    <strong>怎么「手写感受」：</strong>看右下方源码，对照下面几个点 ——
+    ① <code>createElement</code> 只是生成一个 JS 对象（虚拟 DOM），不碰真实 DOM；
+    ② <code>render/reconcile</code> 拿「旧 vnode 和新 vnode」做 diff，类型相同就复用真实 DOM、只改变化的属性和文本；
+    ③ <code>useState</code> 用「全局 hook 数组 + 调用顺序」存状态，所以 Hooks 不能写在 if 里；
+    ④ <code>useEffect</code> 用 <code>Object.is</code> 比较依赖数组，变了才执行，并支持 cleanup。
+  </div>
+
+  <script>
+    // ============================================================
+    // 1. 手写 createElement：生成虚拟 DOM（只是一个 JS 对象）
+    // ============================================================
+    function createElement(type, props, ...children) {
+      return {
+        type,
+        props: {
+          ...props,
+          children: children.flat().map((child) =>
+            typeof child === 'object' ? child : createTextElement(child)
+          ),
+        },
+      }
+    }
+
+    function createTextElement(text) {
+      return { type: 'TEXT_ELEMENT', props: { nodeValue: String(text), children: [] } }
+    }
+
+    // ============================================================
+    // 2. 手写 render + reconcile（diff 的核心）
+    // ============================================================
+    let rootInstance = null
+    let rootElement = null
+    let rootContainer = null
+
+    function render(element, container) {
+      rootElement = element
+      rootContainer = container
+      rootInstance = reconcile(container, rootInstance, element)
+    }
+
+    function renderRoot() {
+      render(rootElement, rootContainer)
+    }
+
+    function reconcile(parentDom, instance, element) {
+      if (instance == null) {
+        // 新挂载
+        const newInstance = instantiate(element)
+        parentDom.appendChild(newInstance.dom)
+        log('挂载：' + describe(element))
+        return newInstance
+      } else if (element == null) {
+        // 删除
+        parentDom.removeChild(instance.dom)
+        log('删除：' + describe(instance.element))
+        return null
+      } else if (instance.element.type !== element.type) {
+        // 类型不同：直接替换（真实 React 里 key 也参与这里）
+        const newInstance = instantiate(element)
+        parentDom.replaceChild(newInstance.dom, instance.dom)
+        log('替换：' + describe(element))
+        return newInstance
+      } else if (typeof element.type === 'string') {
+        // 同为 DOM 元素：复用节点，只更新属性，再递归 diff 子节点
+        updateDomProperties(instance.dom, instance.element.props, element.props)
+        instance.childInstances = reconcileChildren(instance, element)
+        instance.element = element
+        return instance
+      } else {
+        // 函数组件：更新 props，重新执行组件函数，再递归 diff 它返回的子树
+        instance.publicInstance.props = element.props
+        resetHooks()
+        const childElement = instance.publicInstance.render()
+        const oldChildInstance = instance.childInstance
+        const childInstance = reconcile(instance.dom, oldChildInstance, childElement)
+        instance.dom = childInstance.dom
+        instance.childInstance = childInstance
+        instance.element = element
+        return instance
+      }
+    }
+
+    function reconcileChildren(instance, element) {
+      const dom = instance.dom
+      const childInstances = instance.childInstances || []
+      const nextChildElements = element.props.children || []
+      const newChildInstances = []
+      const count = Math.max(childInstances.length, nextChildElements.length)
+      // 简化版按 index 对齐；真实 React 会用 key + 双端/快速 diff 找最小移动
+      for (let i = 0; i < count; i++) {
+        newChildInstances.push(reconcile(dom, childInstances[i], nextChildElements[i]))
+      }
+      return newChildInstances.filter((ins) => ins != null)
+    }
+
+    function instantiate(element) {
+      const { type, props } = element
+      const isDomElement = typeof type === 'string'
+
+      if (isDomElement) {
+        const isText = type === 'TEXT_ELEMENT'
+        const dom = isText
+          ? document.createTextNode(props.nodeValue)
+          : document.createElement(type)
+        updateDomProperties(dom, {}, props)
+        const childInstances = (props.children || []).map(instantiate)
+        childInstances.forEach((child) => dom.appendChild(child.dom))
+        return { dom, element, childInstances }
+      }
+
+      // 函数组件：组件函数每次 render 时执行，hooks 通过全局变量收集
+      const instance = {}
+      const publicInstance = createPublicInstance(element, instance)
+      resetHooks()
+      const childElement = publicInstance.render()
+      const childInstance = instantiate(childElement)
+      Object.assign(instance, {
+        dom: childInstance.dom,
+        element,
+        childInstance,
+        publicInstance,
+      })
+      return instance
+    }
+
+    function createPublicInstance(element) {
+      const { type, props } = element
+      return { props, render: () => type(props) }
+    }
+
+    function updateDomProperties(dom, prevProps, nextProps) {
+      const isEvent = (name) => name.startsWith('on')
+
+      // 移除旧事件
+      Object.keys(prevProps).filter(isEvent).forEach((name) => {
+        const eventType = name.toLowerCase().substring(2)
+        dom.removeEventListener(eventType, prevProps[name])
+      })
+      // 移除旧属性
+      Object.keys(prevProps)
+        .filter((key) => !isEvent(key) && key !== 'children')
+        .forEach((key) => { dom[key] = '' })
+      // 设置新属性
+      Object.keys(nextProps)
+        .filter((key) => !isEvent(key) && key !== 'children')
+        .forEach((key) => { dom[key] = nextProps[key] })
+      // 添加新事件
+      Object.keys(nextProps).filter(isEvent).forEach((name) => {
+        const eventType = name.toLowerCase().substring(2)
+        dom.addEventListener(eventType, nextProps[name])
+      })
+    }
+
+    // ============================================================
+    // 3. 手写 useState：全局 hook 数组 + 调用顺序
+    // ============================================================
+    let hooks = []
+    let hookIndex = 0
+
+    function resetHooks() {
+      hookIndex = 0
+    }
+
+    function useState(initialValue) {
+      const index = hookIndex
+      hookIndex++
+      if (hooks[index] == null) hooks[index] = { state: initialValue }
+      const state = hooks[index].state
+      const setState = (value) => {
+        const next = typeof value === 'function' ? value(hooks[index].state) : value
+        hooks[index] = { state: next }
+        log('setState：index=' + index + '，新值=' + JSON.stringify(next))
+        renderRoot()
+      }
+      return [state, setState]
+    }
+
+    // ============================================================
+    // 4. 手写 useEffect：依赖数组比较 + cleanup
+    // ============================================================
+    function useEffect(callback, deps) {
+      const index = hookIndex
+      hookIndex++
+      const old = hooks[index]
+      const hasChanged =
+        !old || !old.deps || deps.some((dep, i) => !Object.is(dep, old.deps[i]))
+      if (hasChanged) {
+        if (old?.cleanup) old.cleanup()
+        const cleanup = callback()
+        hooks[index] = { deps, cleanup }
+      }
+    }
+
+    // ============================================================
+    // 5. 用一个 Counter 组件验证我们的 Mini React
+    // ============================================================
+    function App() {
+      const [count, setCount] = useState(0)
+      const [text, setText] = useState('')
+
+      useEffect(() => {
+        log('useEffect 执行：count = ' + count)
+        return () => log('useEffect cleanup：上一次 count = ' + count)
+      }, [count])
+
+      return createElement(
+        'div',
+        null,
+        createElement('h2', null, 'Mini React Counter'),
+        createElement('p', null, '当前计数：', count),
+        createElement('button', { onClick: () => setCount(count + 1) }, '+1'),
+        createElement('button', { onClick: () => setCount(0) }, '重置'),
+        createElement('p', null,
+          createElement('input', {
+            onInput: (e) => setText(e.target.value),
+            placeholder: '输入文字触发 re-render',
+          })
+        ),
+        createElement('p', null, '你输入了：', text)
+      )
+    }
+
+    // ============================================================
+    // 日志与可视化辅助
+    // ============================================================
+    const logs = []
+    function log(msg) {
+      logs.push(msg)
+      document.getElementById('log').textContent = logs.slice(-20).join('\n')
+    }
+
+    function describe(element) {
+      if (element == null) return 'null'
+      if (typeof element.type === 'string') {
+        if (element.type === 'TEXT_ELEMENT') return '文本(' + element.props.nodeValue + ')'
+        return '<' + element.type + '>'
+      }
+      return '组件(' + (element.type.name || '匿名') + ')'
+    }
+
+    function showVnode() {
+      const replacer = (key, value) =>
+        typeof value === 'function' ? '[Function ' + (value.name || '匿名') + ']' : value
+      document.getElementById('vnode').textContent = JSON.stringify(rootElement, replacer, 2)
+    }
+
+    function showSource() {
+      document.getElementById('source').textContent = [
+        'createElement → 生成 vnode 对象',
+        'render/reconcile → diff 新旧 vnode，复用 DOM',
+        'useState → hooks[i] 按调用顺序存状态',
+        'useEffect → 依赖数组变了才执行 + cleanup',
+      ].join('\n\n')
+    }
+
+    // 启动
+    const root = document.getElementById('root')
+    render(createElement(App, null), root)
+    showVnode()
+    showSource()
+    log('已挂载 App，点击按钮观察 diff 与 hook 日志')
+  </script>
+</body>
+</html>

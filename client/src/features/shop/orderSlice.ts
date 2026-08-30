@@ -30,11 +30,14 @@ const orderSlice = createSlice({
   name: 'orders',
   initialState,
   reducers: {
-    resetOrderStatus(state) {
+    resetOrderStatus (state) {
       state.status = 'idle'
       state.error = undefined
       state.currentOrder = undefined
     },
+    setOrderStatus (state, action) {
+      state.status = action.payload
+    }
   },
   extraReducers: (builder) => {
     builder

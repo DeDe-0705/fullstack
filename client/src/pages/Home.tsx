@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Flex, Spin, Statistic, Typography } from "antd";
 import { useCounterStore } from "../stores/counter";
-import { api } from "../lib/api";
-import { useRef } from "react";
+import { api, DEMO_TOKEN } from "../lib/api";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 export function Home() {
   const { count, increment, decrement, reset } = useCounterStore();
@@ -11,6 +11,64 @@ export function Home() {
     queryKey: ["health"],
     queryFn: () => api.get<{ status: string }>("/health"),
   });
+  const [num, setNum] = useState(0);
+
+  const reducer = (
+    state: { count: number },
+    action: { type: string; count: number },
+  ) => {
+    switch (action.type) {
+      case "increment":
+        return {
+          ...state,
+          count: state.count + action.count,
+        };
+      case "decrement":
+        return {
+          ...state,
+          count: state.count - action.count,
+        };
+
+      default:
+        throw new Error("Unsupported action type");
+    }
+  };
+
+  const [countNum, dispatch] = useReducer(
+    reducer,
+    { count: 0 },
+    (init: { count: number }) => {
+      console.log("init", init);
+      return init;
+    },
+  );
+
+  useEffect(() => {
+    const abort = new AbortController();
+    async function fetchHealth() {
+      console.log("fetching");
+      const res = await fetch("/api/health", {
+        headers: { authorization: `Bearer ${DEMO_TOKEN}` },
+        signal: abort.signal,
+      });
+      const data = await res.json();
+      console.log(data, num, 1111);
+    }
+    fetchHealth();
+    return () => {
+      abort.abort();
+    };
+  }, [num]);
+
+  useEffect(() => {
+    console.log(1);
+  }, []);
+  useEffect(() => {
+    console.log(2);
+  }, []);
+  useEffect(() => {
+    console.log(3);
+  }, []);
 
   const SET_LOADING = Symbol("SET_LOADING");
   console.log(SET_LOADING);

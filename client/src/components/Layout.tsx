@@ -1,32 +1,21 @@
-import { Layout as AntLayout, Menu } from "antd";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
-
-const NAV_ITEMS = [
-  { key: "/", label: "首页" },
-  { key: "/posts", label: "帖子" },
-  { key: "/about", label: "关于" },
-  { key: "/agent", label: "Agent 对话" },
-  { key: "/shop", label: "Shop 场景实战" },
-  { key: "/c-end", label: "C端场景实战" },
-  {
-    key: "/learn",
-    label: "React 学习",
-    children: [
-      { key: "/learn/hooks-closure", label: "Hooks 闭包与 setState" },
-      { key: "/learn/use-effect", label: "useEffect 生命周期" },
-      { key: "/learn/custom-hooks", label: "自定义 Hook 设计" },
-      { key: "/learn/render-optimization", label: "渲染优化" },
-      { key: "/learn/react-19", label: "React 19 新特性" },
-      { key: "/learn/fixed-virtual-list", label: "定高虚拟滚动" },
-    ],
-  },
-];
+import { Suspense, useMemo } from "react";
+import { Layout as AntLayout, Menu, Spin } from "antd";
+import { Outlet, useMatches, useNavigate } from "react-router-dom";
+import { getMenuItems, type MenuMeta } from "../lib/menu";
+import { routes } from "../router/routes";
 
 export function Layout() {
-  const { pathname } = useLocation();
   const navigate = useNavigate();
-  // 子路由（如 /posts/1）时也高亮对应的一级菜单
-  const selectedKey = pathname === "/" ? "/" : `/${pathname.split("/")[1]}`;
+  const matches = useMatches();
+
+  // 菜单由路由配置自动生成，避免在 Layout 里再手写一份 path
+  const menuItems = useMemo(() => getMenuItems(routes), []);
+
+  // 详情页（如 /posts/1）本身不在菜单里，回退到最近一个有 menu 的父级高亮
+  const selectedMatch = [...matches]
+    .reverse()
+    .find((match) => (match.handle as { menu?: MenuMeta } | undefined)?.menu);
+  const selectedKey = selectedMatch?.pathname ?? "/";
 
   return (
     <AntLayout style={{ minHeight: "100vh" }}>
@@ -40,18 +29,22 @@ export function Layout() {
         <Menu
           mode="horizontal"
           selectedKeys={[selectedKey]}
-          items={NAV_ITEMS}
+          items={menuItems}
           onClick={({ key }) => navigate(key)}
           style={{ lineHeight: "63px", borderBottom: "none" }}
         />
       </AntLayout.Header>
-      <AntLayout.Content
-        style={{
-          padding: 8,
-          boxSizing: "border-box",
-        }}
-      >
-        <Outlet />
+      <AntLayout.Content style={{ padding: 8, boxSizing: "border-box" }}>
+        <Suspense
+          fallback={
+            <Spin
+              style={{ display: "block", margin: "40px auto" }}
+              tip="页面加载中..."
+            />
+          }
+        >
+          <Outlet />
+        </Suspense>
       </AntLayout.Content>
     </AntLayout>
   );

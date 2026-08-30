@@ -6,6 +6,15 @@
 
 ## 一、Fiber 架构
 
+> **Fiber 架构四大核心（总览）：**
+>
+> 1. **任务分解**：每个组件对应一个 Fiber 节点（工作单元），保存 `type/props/stateNode` 等信息，用 `child/sibling/return` 三个指针串成可中断的树；
+> 2. **双缓存 + diff**：新的 React 元素树和旧的 current 树对比，生成 workInProgress 树并打 flags，commit 阶段最小化更新 DOM；
+> 3. **优先级调度**：每个更新带 lane 优先级，高优先级可插队，配合时间切片实现暂停/恢复/重排；
+> 4. **状态保存**：Fiber 的 `memoizedState` 保存 hook 链表，让 Hooks 状态跨 render 持久。
+>
+> ⚠️ 术语纠正：React 不是「增量渲染」，而是「全量重新 render + 最小 diff」；优先级是「更新的 lane」，不是「节点之间的对比」。
+
 ### 1.1 为什么需要 Fiber？
 
 React 15 的 Stack Reconciler 是同步递归的——一旦开始 diff 就不能中断，主线程被长时间占用会导致掉帧。
@@ -60,6 +69,18 @@ Commit 阶段完成后：
 
 **好处：** 内存中构建新树完成后一次性替换，保证视觉一致性；构建过程中旧树不受影响。
 
+**核心精髓：复用，而不是重建。**
+
+workInProgress 树不是从零重新生成，而是**复用 current 树中未变化的 Fiber 节点**，只有需要更新的部分才克隆出新节点，通过 `alternate` 和 current 互相关联。这样省内存、省 GC。
+
+**render 阶段的 diff 与标记是同一件事：**
+
+遍历的过程就是 diff/reconcile，diff 的结果就是打上 `flags`（副作用标记），不是「先标记再 diff」两个先后步骤。
+
+**精修版总结：**
+
+> 双缓存是 Fiber 的核心：React 同时维护 current 树（屏幕显示）和 workInProgress 树（内存构建）。更新时复用 current 中未变化的节点、克隆变化的部分，边遍历边 diff、边打 flags 和优先级；commit 完成后把 root.current 指针切换到新 workInProgress。核心价值是「复用节点 + 指针切换」，而不是重建整棵树。
+
 ### 1.4 工作循环（Work Loop）
 
 ```
@@ -76,11 +97,115 @@ commit 阶段（不可中断）：
   3. layout          (useLayoutEffect)
 ```
 
+### 1.5 一次更新的完整流程（从 setState 到屏幕更新）
+
+> 总纲：React 核心 = `UI = f(state)`（数据驱动视图）。Fiber 四大核心：任务分解、双缓存 + diff、优先级调度、状态保存。
+
+```
+① 触发：setState / dispatch 创建 update，追加到 hook.queue.pending
+        （此时 state 没变，只是入队）
+
+② 调度：Scheduler 根据 update.lane 分配优先级，决定何时渲染
+
+③ render 阶段（可中断）：
+   - 遍历构建 workInProgress 树
+   - processUpdateQueue：执行 queue 里的 update，算出新 state，写回 hook.memoizedState
+   - 组件函数重新执行（拿到新 state）
+   - diff：对比新旧，打上 flags（增/删/改标记）
+
+④ commit 阶段（不可中断）：
+   根据 flags 一次性操作真实 DOM
+
+⑤ 切换 current 指针，渲染完成
+```
+
+**关键顺序（易错）：**「执行队列拿最新 state」（processUpdateQueue）在 **render 阶段**，和 diff 打 flag 是同一阶段；commit 只照着 flag 改真实 DOM，不再算 state。优先级 lane 在 update 创建时已定，不是 render 阶段打的。
+
+**易错补充：**
+
+- ❌ 说成「compiler」——render 之后是 **commit**，不是 compiler（compiler 是 React 编译器，构建期自动记忆化）；
+- ❌ 说「每个 fiber 的 hooks pending 队列都会计算」——只有**有更新的组件**才 processUpdateQueue，bailout 的不处理；
+- ❌ 说「scheduler 打优先级」——lane 在 update 创建时已定，scheduler 只是根据 lane 调度。
+
+### 1.6 渲染边界：lane 冒泡 + bailout
+
+**render 的起点是根（HostRoot），不是触发组件。** setState 触发后：
+
+1. `markUpdateLaneFromFiberToRoot`：给触发 Fiber 标记 lane，沿 `return` 向上冒泡，给所有祖先标记 `childLanes`，直到根；
+2. render 从 HostRoot 开始深度优先遍历；
+3. 遍历到每个节点检查：自身 `lanes` 为空且 `childLanes` 为空 → **bailout**，跳过整棵子树（不执行组件函数，复用旧 Fiber 和 DOM）；
+4. 触发组件 `lanes` 有更新 → 重新执行组件函数；
+5. 子组件：默认函数组件做「引用相等」比较（几乎总是重渲染），用 `React.memo` 才做浅比较、没变才 bailout。
+
+```
+Root ──► App ──► B ──► C（触发点）
+  ↑        ↑      ↑      ↑
+childLanes 被标记（子树有更新）
+
+遍历时：Root/App/B 自身 lanes 空但 childLanes 有 → 路过不重渲染
+        C lanes 有 → 重新执行
+        C 的子组件 → props 没变 bailout，变了重渲染
+```
+
+**面试话术：** setState 触发后，React 标记该 Fiber 的 lane，并沿 return 向上冒泡标记祖先 childLanes，然后从根深度优先遍历；lanes 和 childLanes 都为空就 bailout 跳过子树。所以祖先只是路过不重渲染，真正重渲染的是触发组件本身和 props 变化的子组件——这是靠「lane 冒泡 + bailout」实现的精准渲染边界，不是「只看触发组件」。
+
+---
+
+### 1.7 memo 的 bailout 边界（模拟面试 #9 盲区补录，2026-08-26）
+
+> 来源：2026-08-26 React 专场模拟面试第三题（Parent/Child/MemoChild 打印次数题）。
+> 暴露问题：打印次数账本糊、memo 机制说不出、bailout 边界不清。以下为精确答案。
+
+**渲染账本（必须形成条件反射）：**
+
+```jsx
+// Parent 内含 <Child /> 和 <MemoChild />（React.memo 包裹），点击按钮 3 次
+Parent render:   4 次（初始挂载 1 + setState 3）
+Child render:    4 次（父渲染 → 子无条件重渲染，与 props 无关）
+MemoChild render: 1 次（仅初始挂载，之后 props 浅比较通过 → bailout，函数体不执行）
+```
+
+**memo bailout 四边界（挡得住 / 挡不住）：**
+
+| 场景 | 挡得住吗 | 原因 |
+| --- | --- | --- |
+| 父渲染 + props 浅比较通过 | ✅ | memo 的本职：逐个 `Object.is`，全等则跳过 render |
+| 父渲染 + props 浅比较失败 | ❌ | 内联函数/对象字面量每次引用都新，比较必假，memo 形同虚设 |
+| 自身 state 变化 | ❌ | memo 只拦 props 通道，管不了组件自己的 setState |
+| Context 变化 | ❌ | Context 值查找发生在渲染期、不走 props 通道，直接穿透 memo |
+
+第三行是「memo 必须配 useMemo/useCallback」的根本原因，也是 React Compiler 存在的动机（自动保证引用稳定）。
+
+**⚠️ 精确性纠正（本轮实际口误）：**
+
+- 「闭包里的 state 是上一次渲染的快照」→ **不准确**。是 **effect 执行那一刻那次渲染的快照**，之后组件重渲染一百次，只要依赖不变、effect 不重跑，这个闭包里的值一个字都不变。
+- 闭包陷阱症状：不是「并发消息才丢数据」，是**无论何时**新数据都基于过期快照展开——聊天室例子里列表永远只显示最后一条。
+- startTransition 里包裹的是 **state 更新**（`startTransition(() => setX(v))`），不是异步请求。React 调度的是渲染，不是 IO；异步数据接入渲染优先级的正路是 React 19 的 `use(promise)` + Suspense。
+
+**effect 对称性原则（setup/cleanup 幂等可重放）：**
+
+- setup 做了什么，cleanup 必须完整撤销什么——让 React 可以随时销毁重跑 effect 而不留副作用残留。
+- StrictMode 双执行（mount → unmount → remount）就是在测这条 invariant。
+- 全局单例约束下，监听器清理必须用具名引用：`const handler = ...; socket.on('message', handler); return () => socket.off('message', handler);`——匿名函数 off 不掉。
+- 依赖数组权衡：漏依赖 → 闭包过期（数据覆盖）；全依赖 → effect 风暴（反复断连重连）。函数式更新 `setX(prev => ...)` 不读旧 state，直接绕开整个权衡。
+
 ---
 
 ## 二、Hooks 原理
 
 ### 2.1 Hooks 的存储结构
+
+**核心心智模型：状态不在函数里，而在 Fiber 上。**
+
+函数组件每次 render 都是重新执行一遍函数，但状态能「记住」，是因为状态不存函数作用域里，而是存在组件对应的 **Fiber 节点的 `memoizedState` 单向链表**上。
+
+```mermaid
+graph LR
+  Fiber["Fiber 节点"] -->|"memoizedState"| H1["Hook1: useState(count)"]
+  H1 -->|"next"| H2["Hook2: useState(text)"]
+  H2 -->|"next"| H3["Hook3: useEffect"]
+  H3 -->|"next"| Null["null"]
+```
 
 ```js
 // 每个 Fiber 节点维护一个 hooks 链表
@@ -96,7 +221,88 @@ fiber.memoizedState → hook1 → hook2 → hook3 → null
 }
 ```
 
-**为什么要按顺序调用？** Hook 的查找依赖链表顺序。条件调用会打乱索引，导致状态错乱。
+**Hook 节点的真实字段：**
+
+```js
+{
+  memoizedState: null,  // useState：当前值；useEffect：effect 对象；useMemo：[值, deps]
+  baseState: null,      // 计算 state 的基准
+  baseQueue: null,      // 基准更新队列（优先级相关）
+  queue: null,          // 更新队列（useState 用）
+  next: null,           // 指向下一个 Hook
+}
+```
+
+**注意两个 memoizedState 是两回事：**
+
+- `Fiber.memoizedState`：指向 Hook 链表头；
+- `Hook.memoizedState`：存这个 Hook 自己的状态值。
+
+**queue 和 update 的结构：**
+
+```js
+// Hook.queue
+{
+  pending: null,                    // 待处理的 update 循环链表（环形）
+  dispatch: null,                   // setState 函数
+  lastRenderedReducer: reducer,     // 计算 state 用的 reducer
+  lastRenderedState: initialState,  // 上次渲染的 state
+}
+
+// 每个 update（一次 setState 产生一个）
+{
+  lane: lane,       // 优先级
+  action: action,   // 值 或 函数（prev => ...）
+  next: null,       // 循环链表指针
+}
+```
+
+**层级总览：**
+
+```
+Fiber.memoizedState → Hook1 →next→ Hook2 →next→ Hook3 → null
+                       ├─ memoizedState：状态值
+                       └─ queue → pending → update 循环链表
+```
+
+**为什么要按顺序调用？**
+
+render 时 React 是「按调用顺序」遍历这条链表的：
+
+- 第 1 次调用 `useState` → 取链表第 1 个节点；
+- 第 2 次调用 `useState` → 取链表第 2 个节点；
+- ...
+
+一旦用 `if` / 循环在某次 render 跳过某个 Hook，调用顺序就变了，后面的 Hook 会取错节点，状态全部错位。所以 Hooks 必须写在顶层，不能条件调用。
+
+**「取错节点」的「节点」指什么？**
+
+指的是 **Hook 链表上的 Hook 节点**——每个 Hook 对应一个节点，里面存 `memoizedState`（状态值）、`queue`、`next`。React 用一个「当前指针」按**调用顺序**遍历链表，只看「第几次调用」，不看 Hook 内容。
+
+```tsx
+function Component() {
+  const [a] = useState('A')   // 第 1 次调用
+
+  if (someCondition) {
+    const [b] = useState('B') // 第 2 次调用（仅条件成立时）
+  }
+
+  const [c] = useState('C')   // 第 3 次调用
+}
+```
+
+- 首次 render（条件成立）：创建 `节点1(A) → 节点2(B) → 节点3(C)`；
+- 第二次 render（条件不成立，跳过 `useState('B')`）：第 2 次调用 `useState('C')` 会去取**链表第 2 个节点**（存的是 B），导致 `c` 拿到 `'B'` 而不是 `'C'`，状态错位。
+
+**对照 Vue：**
+
+| Vue | React Hooks |
+| --- | --- |
+| 响应式依赖收集（track/trigger） | Hook 链表 + 调用顺序 |
+| `ref` 值存在 Dep/RefImpl | `useState` 值存在 `hook.memoizedState` |
+| 依赖变化自动触发更新 | `setState` 推进 queue，触发 re-render |
+
+Vue 是「数据变了我自己去通知」；React 是「状态变了重新执行函数，按顺序从链表取状态」。
 
 ### 2.2 useState 源码级原理
 
@@ -136,6 +342,82 @@ function useState(initialState) {
 }
 ```
 
+**setState 与 render 的流转：**
+
+```
+setCount(action)
+  → 创建 update { action, lane, next }
+  → 加入 queue.pending（环形链表）
+  → 触发调度，标记 fiber 需要更新
+  （此时不碰 hook.memoizedState，值没变）
+
+下次 render（processUpdateQueue）：
+  → 从 baseState / memoizedState 作为起点
+  → 遍历 queue.pending 的 update，逐个执行 action
+      action 是函数 → action(state)
+      action 是值   → 直接作为新 state
+  → 得到最终 state，写回 hook.memoizedState
+```
+
+**useState 底层是 useReducer 的特例：**
+
+```js
+function basicStateReducer(state, action) {
+  return typeof action === 'function' ? action(state) : action
+}
+// useState(0) 等价于 useReducer(basicStateReducer, 0)
+```
+
+这也是 useReducer 和 useState 共用同一套存储结构（memoizedState + queue）的原因。
+
+**setState 传相同值会跳过更新吗？（eagerState 优化 + bailout）**
+
+会，但主要不是 diff 识别，而是两层机制：
+
+1. **dispatch 阶段 eagerState 优化**：当 hook 的 queue 为空时，React 提前算出新值，用 `Object.is` 和当前 `memoizedState` 比较，相同则直接 return，**连调度都不触发、不进 render**；
+2. **render 阶段 bailout**：如果因别的更新进入 render，diff 时对「props 浅比较相同且无 pending lane」的子组件直接复用旧 Fiber 和 DOM，跳过子树（`React.memo` 就是开这个开关）。
+
+**Object.is 只比引用，注意边界：**
+
+```
+setCount(0)            → 相同，跳过 ✅
+setCount(prev => prev) → 返回相同值，跳过 ✅
+setCount({})           → 两次 {} 引用不同，不跳过 ❌
+```
+
+**面试话术：** setState 传相同值能跳过，但主要在 dispatch 阶段的 eagerState 优化（队列空时提前求值 + Object.is 比较），已进入 render 则靠 bailout 跳过没变的子树。注意 Object.is 只比引用。
+
+### 2.2.1 追问：setState 的 updater 很复杂会阻塞渲染吗？
+
+**结论：会，但根因是「长任务占主线程」，不是 setState 本身。**
+
+setState 的 updater 函数、组件 render 都跑在主线程上。复杂计算一旦超过一帧 16ms，浏览器就来不及绘制，表现为掉帧、交互卡顿。
+
+**同步更新 vs 并发更新（关键区分）：**
+
+| 更新方式 | 能否中断 | 结果 |
+| --- | --- | --- |
+| 普通 `setState` | ❌ 不可中断 | 复杂 render 一路跑到 commit，阻塞主线程 |
+| `useTransition` / `useDeferredValue` | ✅ 可中断 | 时间切片，让输入、动画等紧急更新插队 |
+
+```jsx
+// ❌ 普通更新：复杂 render 会卡住主线程
+setData(complexData)
+
+// ✅ 标记为非紧急：React 切片，紧急更新优先
+const [isPending, startTransition] = useTransition()
+startTransition(() => setData(complexData))
+```
+
+**解决方案分层：**
+
+1. 复杂计算提前算好，或用 `useMemo` 缓存；
+2. 真正重的计算丢到 Web Worker，不占主线程；
+3. 低优先级更新用 `useTransition` / `useDeferredValue`，享受可中断 + 时间切片；
+4. 渲染节点太多用虚拟滚动减少实际渲染量。
+
+**面试话术：** render 和 updater 都在主线程执行，复杂计算产生长任务会掉帧。用 useMemo 提前算、重计算放 Web Worker、不紧急更新用 useTransition 标记让 React 可中断切片。注意普通 setState 是同步不可中断的，只有并发更新才享受时间切片。
+
 ### 2.3 useEffect vs useLayoutEffect
 
 ```
@@ -150,6 +432,21 @@ useLayoutEffect:
   特点：同步，会阻塞浏览器绘制
 ```
 
+**useLayoutEffect 经典场景：**
+
+1. 测量 DOM 布局后立即调整（读尺寸 → 改样式，绘制前完成，避免闪烁）；
+2. 恢复滚动位置（切换列表/页面后设置 `scrollTop`，避免闪一下顶部再跳回）；
+3. 第三方库需要在绘制前拿到准确尺寸、同步操作 DOM。
+
+```tsx
+useLayoutEffect(() => {
+  const el = ref.current!
+  el.style.left = `${el.getBoundingClientRect().width}px`
+}, [])
+```
+
+**易错点：** 会阻塞渲染，别放耗时操作或发请求；SSR 下会有警告（服务端没有 DOM 和绘制阶段），需改用 useEffect 或做环境判断。
+
 ### 2.4 useMemo vs useCallback
 
 ```js
@@ -161,6 +458,21 @@ const onClick = useCallback(() => doSomething(a), [a])
 
 // useCallback(fn, deps) 等价于 useMemo(() => fn, deps)
 ```
+
+**useCallback 经典场景：**
+
+1. 配合 `React.memo` 避免子组件无谓 re-render：父组件 re-render 时回调引用稳定，memo 子组件 props 没变就跳过渲染；
+2. 作为 `useEffect` 的依赖，避免 effect 因函数引用变化而重复执行；
+3. 自定义 Hook 返回函数，保证引用稳定，调用方可安全放进依赖数组。
+
+```tsx
+const handleClick = useCallback(() => setCount(c => c + 1), [])
+
+const fetchData = useCallback(async () => { /* ... */ }, [userId])
+useEffect(() => { fetchData() }, [fetchData])
+```
+
+**易错点：** `useCallback` 不减少「创建函数」的开销，只减少「子组件 re-render」；单独用没意义，必须配合 `React.memo`；React Compiler 时代手动 `useCallback` 在逐渐减少。
 
 ### 2.5 useRef
 
@@ -225,6 +537,18 @@ useImperativeHandle(ref, () => ({
 3. 通过 key 标识子节点
    key 用于判断节点是新增/删除/移动
 ```
+
+**经典三大策略（Tree / Component / Element diff）：**
+
+1. **Tree diff（层级比较）**：只对同一层级的兄弟节点做对比；跨层级移动（从父 A 移到父 B）不会被识别为「移动」，而是「删除旧位置 + 在新位置新建」，即销毁重建，**state 会丢失、DOM 会重建**；
+2. **Component diff（组件比较）**：同类型组件继续按树 diff，不同类型直接替换，不深入比较；
+3. **Element diff（元素比较）**：同层级的列表节点用 key 精确匹配，实现复用/移动/新增/删除。
+
+**为什么这样设计：** 两棵树的精确最小编辑距离是 O(n³)，React 用这三个简化假设（只比同层级、类型不同直接替换、列表用 key）把复杂度降到 O(n)，用「牺牲跨层级移动的精确性」换性能。
+
+**工程影响：** 跨层级移动会丢 state、重建 DOM，开发中应避免真正跨层级移动组件；需要「移动」时用 CSS（`position`/`transform`）做视觉移动，而不是真把组件搬到另一层。
+
+**面试话术：** React diff 有三大策略——tree diff 只比同层级，跨层级移动销毁重建、丢 state；component diff 同类型继续比、不同类型替换；element diff 用 key 匹配列表。这些策略把 diff 从 O(n³) 降到 O(n)，代价是识别不了跨层级移动。
 
 ### 3.2 Fiber Diff 的单链表遍历
 
@@ -327,6 +651,69 @@ useEffect(() => {
   离屏内容 —— 低优先级
   useTransition 包裹的 —— 过渡优先级
 ```
+
+**关键纠正：并发不是「异步渲染」，而是「可中断的同步渲染 + 优先级调度」。**
+
+React 的 render 是主线程上的一个 `while` 循环，**同步地**逐个执行 Fiber 单元；每执行完一个，调用 `shouldYield()` 判断是否让出主线程。让出后浏览器去绘制、响应输入，之后再恢复。它不是 `async/await` 那种异步。
+
+**并发模式的三件事：**
+
+1. **任务分割**：Fiber 把整棵树的渲染拆成一个个可中断的工作单元；
+2. **同步分片 + 让出**：主线程同步执行，每单元执行完检查 `shouldYield()`，必要时让出控制权；
+3. **优先级调度**：更新带 lane 优先级，高优先级插队——这是「让出」的目的。
+
+**「暂停/让出」的底层实现：退出循环 + 宏任务恢复，不是 while 空转。**
+
+React 不会开 while 无限循环空转等待（那是忙等待，会卡死主线程）。真正的「暂停」是主动退出循环、让出主线程，再由 Scheduler 安排下一个宏任务恢复。
+
+```js
+// render 内部：shouldYield() 为 true 就退出循环
+function workLoop(task) {
+  while (task && !shouldYield()) {
+    task = performUnitOfWork(task) // 处理一个 Fiber 单元
+  }
+}
+
+// Scheduler：用 MessageChannel 把工作分片到宏任务
+function schedule(task) {
+  const channel = new MessageChannel()
+  channel.port1.onmessage = () => {
+    workLoop(task)
+    if (!task.done) {
+      channel.port2.postMessage(null) // 没做完，安排下一个宏任务继续
+    }
+  }
+  channel.port2.postMessage(null)
+}
+```
+
+**完整流程：** 宏任务 A 执行一个时间片（约 5ms）→ `shouldYield()` 超时退出 → 浏览器绘制/响应输入 → postMessage 安排宏任务 B → 从断点继续 → 直到渲染完成。
+
+**为什么用 MessageChannel：** 它是宏任务，能让浏览器在宏任务之间获得渲染和响应输入的机会；且比 `setTimeout` 更精确（setTimeout 有约 4ms 最小延迟限制）。
+
+**一句话：** React 的「暂停」是「执行完一个时间片就退出循环、让出主线程」，再由 MessageChannel 安排下一个宏任务恢复——协作式让出，不是忙等待，也不是真正的异步。
+
+**中断后来了高优先级 update：lane 合并 + 丢弃未完成 + 低优先级延后。**
+
+`lane` 是位掩码，可以合并：高优先级 update 进来时，会把它的 lane 合并到 `Fiber.lanes` 上（`低优先级 lane | 高优先级 lane`）。
+
+```
+① 低优先级 update（useTransition）进来 → 开始 render
+② render 进行到一半，用户输入（高优先级 update）进来
+③ 高优先级 lane 合并到 Fiber.lanes
+④ 当前低优先级 render 被打断 → 未完成的 work 被丢弃
+⑤ 重新从根开始 render → 优先处理高优先级 lane
+   （已完成、不受新 update 影响的节点通过 alternate 复用）
+⑥ 高优先级 render 完成 → commit
+⑦ 之后空闲时 → 低优先级 update 重新 render → 延后完成
+```
+
+**两个精确点：**
+
+1. 不是「整体重来」：未完成的部分丢弃重算，已完成且不受影响的节点通过 alternate 复用；
+2. 低优先级 update 不丢失，还在 queue 里，空闲时再处理。
+
+**面试话术：** 高优先级更新进来会打断低优先级 render：React 把新 lane 合并到 Fiber.lanes，丢弃未完成 work，重新从根遍历并优先处理高优先级；低优先级更新不丢，延后到空闲再渲染。
 
 ### 4.2 useTransition
 
@@ -473,6 +860,17 @@ React 17 之后：委托到 root 容器（createRoot 挂载的节点）
   3. 统一 API：所有事件走同一套合成事件规范
 ```
 
+**冒泡分发过程：**
+
+```
+用户点击 <button>
+  → 事件从 button 冒泡到 root 容器
+  → React 在 root 上统一捕获
+  → 根据事件目标，分发（dispatch）给对应的 React 组件
+```
+
+所以 React 不是给每个元素绑监听器，而是「统一绑在 root + 冒泡后分发」。
+
 ### 7.3 为什么 React 17 要从 document 改到 root 容器
 
 ```
@@ -489,9 +887,82 @@ Vue 的事件是直接绑定到具体元素上的原生事件（编译时生成 
 
 React 在合成事件处理函数中会触发**自动批处理**（Automatic Batching）——一次事件里多次 `setState` 只触发一次渲染。这也是为什么"在 setTimeout/原生事件里 setState 的行为和合成事件里不同"（React 18 前）。
 
+### 7.6 e.target vs e.currentTarget + 事件池
+
+**e.target vs e.currentTarget（高频）：**
+
+| | 含义 |
+| --- | --- |
+| `e.target` | **真正触发事件**的那个元素（最深层目标） |
+| `e.currentTarget` | 当前**正在处理事件的组件**对应的 DOM 元素 |
+
+```tsx
+<button onClick={handleClick}>
+  <span>点我</span>
+</button>
+
+function handleClick(e) {
+  e.target        // span（真正点到的元素）
+  e.currentTarget // button（绑定 onClick 的组件对应的 DOM）
+}
+```
+
+关键：事件委托在 root，但 React 分发事件时会把 `currentTarget` **动态设置**成「当前处理这个事件的组件对应的 DOM」，所以看到的是 button 而不是 root。
+
+**事件池（event pooling）：** React 17 移除了事件池，之前异步访问 `e` 需要 `e.persist()`，现在不再需要。
+
 ---
 
 ## 八、性能优化体系
+
+### 8.0 React Compiler 与自动记忆化（2026 趋势）
+
+**手动优化的三宗罪：**
+
+1. 容易忘——漏了某处，性能就掉；
+2. 容易过度——到处乱加 `memo/useMemo/useCallback`，代码臃肿，且它们本身也有开销；
+3. 心智负担重——依赖数组要手动维护，漏了就出 bug。
+
+**React Compiler（前身 React Forget）做了什么：**
+
+在**编译期**静态分析代码，自动插入等价于 `React.memo / useMemo / useCallback` 的记忆化代码，让优化不再靠人肉。
+
+| 框架 | 优化方式 |
+| --- | --- |
+| Vue | 运行时依赖收集，自动精准更新 |
+| React（历史） | 手动 memo/useMemo/useCallback |
+| React（现在） | 编译期自动记忆化（React Compiler） |
+
+**两个「不是」：**
+
+- 不是「完全不写」了：Compiler 目前需手动接入（Babel/SWC 插件），尚未默认开启，部分边界场景仍需手动兜底；
+- 不是「不用懂原理」了：`memo/useMemo/useCallback` 原理依旧必考，因为要能说清「编译器替你做了什么」。
+
+**面试话术：** React 的性能优化经历了从手动到自动的演进：以前要手写 memo/useMemo/useCallback，容易漏、容易过度；React 19 引入 React Compiler 在编译期自动插入记忆化，减少手写，和 Vue 靠运行时依赖收集自动优化殊途同归。但编译器还没默认普及，理解原理仍然重要。
+
+### 8.0.1 为什么父组件更新，子组件默认跟着重渲染
+
+父组件 setState 后，函数组件**默认不做 props 浅比较**，子组件会重新执行函数：
+
+```tsx
+function Parent() {
+  const [count, setCount] = useState(0)
+  return (
+    <>
+      <button onClick={() => setCount(c => c + 1)}>+1</button>
+      <Child /> {/* 没传任何 props，但 Parent 重渲染，Child 照样重渲染 */}
+    </>
+  )
+}
+```
+
+`React.memo` 就是给函数组件开一个「props 浅比较」开关：props 没变才跳过。
+
+精确地说：默认函数组件做的是「引用相等」比较（`oldProps === newProps`），父组件每次生成新 element，引用几乎总是不同，所以重渲染；`React.memo` 才做「逐属性 `Object.is` 浅比较」。
+
+**重渲染 ≠ DOM 更新：** 重渲染是重新执行函数、生成 vnode；如果 vnode 没变，diff 后 commit 阶段不会动真实 DOM。memo 省的是「执行函数 + diff」的 JS 开销，不是 DOM 操作。
+
+**面试话术：** 默认情况下父组件 setState 后子组件跟着重渲染，因为函数组件默认不做 props 浅比较；React.memo 开浅比较，没变就跳过。但重渲染只是执行函数生成 vnode，不等于 DOM 更新，memo 省的是 JS 开销。
 
 ### 8.1 React.lazy + Suspense 代码分割
 

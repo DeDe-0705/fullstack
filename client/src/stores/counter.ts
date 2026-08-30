@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { logger } from './logger'
 
 interface CounterState {
   count: number
@@ -7,9 +8,14 @@ interface CounterState {
   reset: () => void
 }
 
-export const useCounterStore = create<CounterState>((set) => ({
-  count: 0,
-  increment: () => set((s) => ({ count: s.count + 1 })),
-  decrement: () => set((s) => ({ count: s.count - 1 })),
-  reset: () => set({ count: 0 }),
-}))
+export const useCounterStore = create<CounterState>()(
+  logger(
+    (set) => ({
+      count: 0,
+      increment: () => set((s) => ({ count: s.count + 1 })),
+      decrement: () => set((s) => ({ count: s.count - 1 })),
+      reset: () => set({ count: 0 }),
+    }),
+    'counter',
+  ),
+)

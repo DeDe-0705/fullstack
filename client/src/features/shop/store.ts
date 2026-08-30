@@ -9,6 +9,8 @@ export const shopStore = configureStore({
   reducer: {
     orders: orderReducer,
   },
+  // 多个 store 时给 DevTools 命名，方便在扩展里区分
+  devTools: { name: 'shop' },
 })
 
 export type ShopRootState = ReturnType<typeof shopStore.getState>
