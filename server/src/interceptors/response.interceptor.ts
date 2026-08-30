@@ -39,6 +39,8 @@ export class ResponseInterceptor<T>
     context: ExecutionContext,
     next: CallHandler<T>,
   ): Observable<ApiResponse<T | null> | T> {
+    // RabbitMQ 等 RPC 上下文没有 HTTP 响应对象，原样放行（与 TokenGuard 同理）
+    if (context.getType() !== 'http') return next.handle();
     const res = context.switchToHttp().getResponse<Response>();
     const traceId = randomUUID();
     res.setHeader('x-trace-id', traceId);

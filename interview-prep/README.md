@@ -42,9 +42,16 @@
 - [Node.js与NestJS](./Node.js与NestJS.md) — Node 事件循环/模块系统/Stream + NestJS 基础架构、依赖注入、横切关注点、项目实战话术
 - [NestJS面试考点大全](./NestJS面试考点大全.md) — 2026 大厂版：DI 原理/AOP 生命周期/ORM 选型/JWT 鉴权/微服务 gRPC/性能高并发/场景题全覆盖
 - [Elasticsearch基础](./Elasticsearch基础.md) — ES是什么、倒排索引、Index/Document/Shard/Replica核心概念、ES vs MySQL选型、使用场景与高频考点
-- [MySQL高频考点与手写SQL](./MySQL高频考点与手写SQL.md) — B+树/联合索引/回表覆盖索引、事务MVCC锁、EXPLAIN慢查询，10道手写SQL含答案
+- [SQL基础语法与执行顺序](./SQL基础语法与执行顺序.md) — SQL语言地基：执行顺序8步流水线、聚合/GROUP BY/HAVING、子查询(NOT IN的NULL坑)、JOIN(ON vs WHERE)、窗口函数(ROW_NUMBER分组TopN)、踩坑清单
+- [MySQL高频考点与手写SQL](./MySQL高频考点与手写SQL.md) — B+树/联合索引/回表覆盖索引、事务MVCC锁、DB自带锁vs应用层锁分层、EXPLAIN慢查询，10道手写SQL含答案
+- [TypeORM使用指南](./TypeORM使用指南.md) — 以 server/ 为样例：三层注册机制(forRootAsync/forFeature/InjectRepository)、Entity装饰器、Repository API、QueryBuilder、事务、Migration工作流、常见坑
+- [TypeORM读写优化与幂等方案](./TypeORM读写优化与幂等方案.md) — NestJS+TypeORM场景：读优化(索引/缓存/读写分离/N+1/深分页)、写幂等(唯一约束/orIgnore/幂等键/乐观锁/MQ去重)、经典场景与面试话术
+- [Redis高频考点大全](./Redis高频考点大全.md) — 单线程模型与底层数据结构、持久化RDB/AOF、过期删除与内存淘汰、缓存穿透/击穿/雪崩、缓存一致性、主从/哨兵/集群、分布式锁(Redisson看门狗/RedLock)、大key热key、Redis 8新特性
+- [分布式锁-Redis与DB对比](./分布式锁-Redis与DB对比.md) — DB锁(行锁/事务/唯一约束/乐观锁) vs Redis锁(SET NX EX/看门狗/RedLock)、三种实现对比、场景判断口诀、秒杀三段式组合拳
+- [NestJS与Redis实战场景题](./NestJS与Redis实战场景题.md) — 基于 server/ 实战：ioredis全局模块接入、cache-aside代码走读、穿透/击穿/雪崩/一致性/分布式锁/MQ延迟兜底释放/限流/DB并发池/降级场景题含具体代码方案、全局守卫拦截MQ消费者坑、面试话术模板
 - [MyBatis基础](./MyBatis基础.md) — MyBatis vs MySQL本质区别、半自动ORM、MyBatis vs JPA选型、#{}与${}、一级二级缓存、动态SQL
 - [Java分层架构](./Java分层架构.md) — Controller/Service/Mapper分层、PO/DTO/VO/BO/Entity各种「O」的区别、完整数据流转、为什么分层
+- [数据库选型与场景方案](./数据库选型与场景方案.md) — 数据库全景分类(8类)、选型决策5维度、典型架构组合(MySQL主从+Redis+ES)、面试选型话术
 - [微前端专题](./微前端专题.md) — 概念与价值、qiankun/无界/Micro-app/Module Federation对比、无界实战、通信/鉴权/路由方案
 - [算法基础](./算法基础.md) — 排序(快排/归并)、树遍历、链表操作、动态规划入门、经典场景题
 - [手写代码](./手写代码.md) — 防抖节流、深拷贝、Promise.all/并发控制、LRU、bind/call/apply、虚拟列表、柯里化、继承
