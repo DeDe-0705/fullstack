@@ -16,6 +16,7 @@
 ## 二、框架原理
 
 - [Vue3 深度原理](./Vue3深度原理.md) — 响应式系统(Proxy)、虚拟DOM diff、Compiler优化、Composition API、生命周期、组件通信、内置组件原理、Vue 3.5/3.6 新特性
+- [Vue3 渲染机制全链路](./Vue3渲染机制全链路.md) — 依赖收集→编译优化→靶向更新三层串联：effect收集、patchFlag/block tree、组件级更新、60秒速答模板、误区纠正
 - [React 核心机制](./React核心机制.md) — Fiber架构、Hooks原理、Diff与render/commit阶段、并发模式、受控/非受控组件、合成事件、性能优化、React 19新特性(Actions/use/RSC)、状态管理(Redux/Zustand)、与Vue对比
 - [React面试考点地图](./React面试考点地图.md) — 大厂评判标准、七层考点地图、高频必考清单、自测清单
 - [React一周速成计划](./React一周速成计划.md) — 7 天冲刺时间表：Vue→React 心智迁移、每日必读+实操 Demo+自测题、React 必考 12 题
