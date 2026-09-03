@@ -674,16 +674,12 @@ function workLoop(task) {
   }
 }
 
-// Scheduler：用 MessageChannel 把工作分片到宏任务
-function schedule(task) {
-  const channel = new MessageChannel()
-  channel.port1.onmessage = () => {
-    workLoop(task)
-    if (!task.done) {
-      channel.port2.postMessage(null) // 没做完，安排下一个宏任务继续
-    }
-  }
-  channel.port2.postMessage(null)
+// Scheduler：模块级单例（全应用只创建一次，不是按任务/节点/更新创建）
+const channel = new MessageChannel()
+channel.port1.onmessage = performWorkUntilDeadline // 只绑定一次
+
+function schedulePerformWorkUntilDeadline() {
+  channel.port2.postMessage(null) // 敲钟：安排下一拍宏任务继续
 }
 ```
 
@@ -752,6 +748,89 @@ const LazyComponent = React.lazy(() => import('./Heavy'))
   <LazyComponent />
 </Suspense>
 ```
+
+### 4.4 MessageChannel 与 Scheduler 时间切片（底层机制）
+
+**MessageChannel 是什么**
+
+一个创建「双通道」的 API，两端各持一个 `port`，一端 `postMessage`，另一端 `onmessage` 收到：
+
+```js
+const channel = new MessageChannel()
+const { port1, port2 } = channel
+port1.onmessage = (e) => console.log('收到', e.data)
+port2.postMessage('hello') // 输出：收到 hello
+```
+
+核心性质只有一条：**`postMessage` 会往宏任务队列里塞一个任务**，回调在当前这一轮事件循环（含微任务）跑完、浏览器有机会渲染之后，才在「下一拍」执行。
+
+**它是全局单例，不是按节点 / 按更新创建**
+
+`new MessageChannel()` 写在 Scheduler 模块顶层，模块 import 时执行一次，全应用共用；与 Fiber 节点、与每次更新都无关。`postMessage` 传的永远是 `null`，只当「敲钟信号」，不承载数据。
+
+源码（`packages/scheduler/src/forks/Scheduler.js`）：
+
+```js
+let schedulePerformWorkUntilDeadline;
+if (typeof localSetImmediate === 'function') {
+  // Node.js 和旧 IE
+  schedulePerformWorkUntilDeadline = () => localSetImmediate(performWorkUntilDeadline);
+} else if (typeof MessageChannel !== 'undefined') {
+  // DOM 和 Worker 环境
+  const channel = new MessageChannel();
+  const port = channel.port2;
+  channel.port1.onmessage = performWorkUntilDeadline;
+  schedulePerformWorkUntilDeadline = () => port.postMessage(null);
+} else {
+  // 非 DOM 环境兜底
+  schedulePerformWorkUntilDeadline = () => localSetTimeout(performWorkUntilDeadline, 0);
+}
+```
+
+**两个循环：外层宏任务循环 + 内层 workLoop**
+
+```
+外层（宏任务循环，由 MessageChannel 撑起）：
+  performWorkUntilDeadline（宏任务）
+    → 执行 scheduledHostCallback（即 flushWork → workLoop）
+    → 返回 hasMoreWork
+    → true 则 schedulePerformWorkUntilDeadline() 即 postMessage(null)
+    → 下一拍宏任务再触发 performWorkUntilDeadline
+
+内层（任务循环 workLoop）：
+  while (currentTask !== null) {
+    if (没到期 && shouldYieldToHost()) break; // 时间片用完 → 中断
+    // 执行 currentTask.callback
+  }
+  return currentTask !== null; // true 表示还有活儿
+```
+
+关键校准：`postMessage(null)` 只是「敲钟唤醒下一拍」，**任务本身留在内存里的 `taskQueue` 中没动**，并不是被推进宏任务队列。
+
+**中断后「断点续跑」**
+
+render 任务被中断时返回一个 continuation 函数（记录暂停在哪个 fiber），Scheduler 把它挂回队头任务的 `callback`，下一拍从这里继续，而不是从头再来：
+
+```js
+const continuationCallback = callback(didUserCallbackTimeout);
+if (typeof continuationCallback === 'function') {
+  currentTask.callback = continuationCallback; // 记录断点
+  return true; // 立刻让出，下一拍从这里继续
+}
+```
+
+**为什么是 MessageChannel（对比其他方案）**
+
+| 方案 | 问题 |
+| --- | --- |
+| `setTimeout(fn, 0)` | HTML 规范规定嵌套超 5 层后最小延迟被钳制为 4ms，每片多白等 |
+| `requestAnimationFrame` | 每帧渲染前才触发一次（约 16.6ms），频率低；后台标签页不触发 |
+| `requestIdleCallback` | Safari 早期不支持；触发时机由浏览器空闲预测决定，不可控 |
+| `MessageChannel` | 宏任务、无 4ms 钳制（0~1ms 触发）、DOM/Worker 通用、不依赖帧节奏 |
+
+**与 Fiber 的关系：** Scheduler 和 Fiber（Reconciler）是解耦的两个包——Fiber 的 `workLoopConcurrent` 每处理一个 fiber 调一次 `shouldYield()`，底层就是 Scheduler 的 `shouldYieldToHost()`（对比 `now - startTime` 是否超过 5ms）；用完了就暂停 diff，返回 `hasMoreWork`，Scheduler 再通过 MessageChannel 开下一拍。
+
+**一句话总结：** `MessageChannel` 是「无 4ms 钳制、跨环境、可高频触发的宏任务发生器」，Scheduler 借它把长任务切成一个个约 5ms 的时间片，让浏览器在片与片之间渲染和响应输入——这是 React 18/19 并发特性的地基。
 
 ---
 
@@ -1202,3 +1281,100 @@ Actions（useActionState / useFormStatus / useOptimistic）把表单提交、异
 
 - [React Hooks 执行流程可视化](./react-hooks-demo.html) — 看 useState/useEffect 在 React 生命周期中的执行时序
 - [React vs Vue Diff 对比演示](./diff-compare-demo.html) — 直观对比二者的 diff 策略差异
+
+---
+
+## 十三、模拟面试盲区补录（2026-09-02，React 专场）
+
+### 13.1 Fiber 不是"让 React 更快"（高频陷阱，本场答错）
+
+Fiber 让渲染**可中断、可调度**，而不是更快。任务拆分 + 调度本身有额外开销，纯渲染吞吐甚至可能略降。它换来的是高优先级任务（用户输入）可以打断低优先级渲染——**用一部分同步渲染的确定性，换交互层面的流畅感**。答题结构：先讲 React 15 递归渲染的动机（递归不可中断、组件树深时长时间占用主线程 → 输入/动画掉帧），再讲 Fiber 方案（链表迭代遍历、工作单元、可暂停恢复）。
+
+### 13.2 Scheduler 时间切片细节
+
+- `shouldYield` 基于**时间预算**：每个切片默认约 **5ms**，超时就让出主线程
+- 用 **MessageChannel** 而非 `setTimeout`：setTimeout 嵌套层级深时有 **4ms 最小延迟**限制，MessageChannel 没有，能让出后**尽快**恢复渲染
+- 不用 `requestIdleCallback`：Safari 不支持 + 执行时机由浏览器决定不可控（高负载时可能很久不触发）
+- 完整底层机制（全局单例、两个循环、断点续跑）见 **4.4 节**
+
+### 13.3 手写 useState 的要点（本场手写题暴露的问题）
+
+- 极简可运行版核心 = **hooks 数组 + 游标 cursor**：`setState` 闭包捕获定义时的槽位 index，所以不会串——这正是"Hooks 不能写在 if 里"的镜像证明（if 跳过一个 hook，后续所有 index 偏移）
+- 真实源码要点：mount/update 两套 dispatcher（`mountState`/`updateState`）；dispatch 在 mount 时 `bind` 绑死 fiber + queue 存入 `queue.dispatch`，是稳定引用，不是每次 render 新建
+- 表述校准：Hook 与状态的对应关系在 **render 阶段**建立（游标沿链表取 memoizedState），不是"执行更新时才取"
+
+### 13.4 Context 性能陷阱（面试题：memo 包裹仍重渲染）
+
+- 诊断顺序：先锁定确定的问题源（组件内字面量对象），别把来源未明的变量混为一谈
+- 修复优先级：**静态对象提到组件外做模块常量（零成本）** > `useMemo` > 全局状态（杀鸡用牛刀）
+- Context 方案的坑：Provider 的 `value` 若每次 render 新建对象，**所有 consumer 全量重渲染** → `value` 必须 `useMemo` 缓存，或按变化频率拆分多个 Context
+
+### 13.5 useTransition vs useDeferredValue + 并发渲染行为
+
+- `useTransition` 标记**一次 setState 更新**为低优先级；`useDeferredValue` 标记**一个值的使用**为低优先级（适合值来自父组件/第三方、无法改 setState 的场景）。同一搜索过滤场景两者都能用，不能说"XX 不适合"
+- **并发渲染 ≠ 防抖**：输入框立即响应（高优），列表渲染可中断——用户停顿片刻列表即跟上，**不是"等输入结束才渲染"**；期间展示 stale UI，可配 `isPending` 过渡提示
+- 救不了单组件内同步 200ms 计算：Fiber 中断粒度是**组件级**，组件 render 内部同步计算不可中断 → Web Worker / 算法优化 / 服务端过滤
+
+### 13.6 useEffect stale closure 的两种修复（必须能秒答）
+
+```js
+// 修复一（优选）：函数式更新，effect 不依赖 count，定时器只建一次
+useEffect(() => {
+  const id = setInterval(() => setCount(c => c + 1), 1000);
+  return () => clearInterval(id);
+}, []);
+
+// 修复二：count 进依赖数组 —— 每 tick 销毁重建定时器，有开销且计时漂移
+useEffect(() => {
+  const id = setInterval(() => setCount(count + 1), 1000);
+  return () => clearInterval(id);
+}, [count]);
+```
+
+优选函数式更新的理由：依赖数组方案每 tick 都 clear + 重建定时器，间隔不再精确（累积漂移）；函数式更新由 React 处理更新队列时传入最新 state，遵循"能不依赖就不依赖"原则。
+
+---
+
+## 十四、模拟面试盲区补录 · 第二轮（2026-09-02，React 19 + 合成事件）
+
+### 14.1 合成事件 stopPropagation 的穿透问题（高频，本轮机理答错）
+
+- 合成事件的 `stopPropagation` **内部同时调用 `nativeEvent.stopPropagation()`**——既阻止合成派发，也阻止真实冒泡
+- React 17 监听点在 **root 容器**：事件冒泡到 root 时 React 捕获 → 在组件树上模拟捕获-冒泡 → handler 里 stopPropagation → 真实冒泡终止 → **root 之上的原生监听（如 body）收不到**
+- React 16 委托在 `document`：body 等原生监听在冒泡路径上**先于** React 处理执行 → 拦不住，会执行。**17 vs 16 行为差异**是高级岗区分点
+- 答题三步法：事件流路径 → 处理点位置 → 拦截是否穿透
+
+### 14.2 受控组件的经典误判（本轮选型答错）
+
+- "受控导致卡"是把症状当病因：单 input 受控重渲成本极低，卡在被牵连的大子树 → 状态下放/拆组件
+- "输入中限制字符 + 失焦格式化"= 程序化干预显示值 = **受控的定义场景**（onChange 清洗 + onBlur 格式化）
+- 非受控直接改 `el.value` 的 **value tracker 深坑**：绕过 React 改值 → tracker 不更新 → 后续 React 判定"值没变"跳过 DOM 更新（需 nativeInputValueSetter hack，不可维护）
+- 非受控真正适用：`<input type="file">`（只能非受控）、集成第三方 DOM 库
+- Vue 对比一句话：v-model = 双向绑定语法糖；React 受控 = 显式单向数据流，环路由开发者显式闭合
+
+### 14.3 RSC 核心考点（本轮最大盲区 ⭐⭐）
+
+- 本质：**执行环境决定能力集**。Server Component 永不在浏览器运行 → 无 hooks/state/事件，可直接 await 数据库、可以是 async 函数组件
+- bundle 减小的精确原因：SC 代码**及其全部依赖**不进客户端 bundle；产出是 **Flight 序列化格式**，不是 JS
+- 边界规则：SC 可 import CC ✅（`'use client'` 边界尽量往叶子推）；CC 不能 import SC ❌，但可**组合**（children/props 传入已渲染的 SC）；跨边界 props **必须可序列化**（函数/class 实例/Symbol 会抛序列化错误）
+- RSC ≠ SSR：SSR 渲染的是 Client Component（全量 JS + hydrate）；RSC 零 JS 零 hydrate；两者正交可叠加（页面 = SC 的 Flight 数据 + CC 部分的 SSR HTML + 选择性 hydrate）
+
+### 14.4 React 19 Actions 与 transition 的关系（本轮答错"没关系"）
+
+- **Actions 本质 = 运行在 async transition 里的函数**：useActionState 底层就是 transition（isPending 即 transition pending）；useOptimistic 必须在 transition 内触发才生效
+- `useActionState(action, initialState)` → `[state, formAction, isPending]`；action 收 `(prevState, formData)`，**返回值即新 state**（loading/error/data 三件套收敛为状态机）
+- useOptimistic 机理：乐观值**不是真实 state**，只在 transition pending 期间覆盖渲染，结束回落真实 state → 失败自动消失，无需手写回滚
+- React 19 是把"mutation + transition + pending + 乐观更新"从手写模式正式化为 API
+
+### 14.5 React Compiler 与手动 memo（观点题标准答案）
+
+1. Compiler 只对遵循 Rules of React 的健康代码生效，不满足就 **bailout 跳过**；且管不了"计算结果作为其他 hook 依赖"的语义场景
+2. 老代码库渐进接入，手动 memo 范式长期共存
+3. 工具自动化"怎么做"，排查考"为什么"（Profiler 诊断、bailout 失效分析仍靠引用相等性原理）
+4. 收尾金句：**"可以删掉"和"可以不懂"是两回事**
+
+### 14.6 Hydration mismatch（修复方案要秒答）
+
+- hydration = 服务端静态 HTML 先到屏 → 客户端重新执行组件绑事件；mismatch 本质 = hydrate 渲染树与服务端 HTML 不一致，无法安全复用 DOM → 整树重渲（SSR 白做）
+- 病灶模式：**渲染期读取"两端环境不同的值"**——localStorage/window、Date.now()/new Date()、Math.random()
+- 修复原则统一：这些值挪到 **useEffect**（useState 占位 → 挂载后 setState），保证首次渲染两端一致；时间戳类可用官方 `suppressHydrationWarning`

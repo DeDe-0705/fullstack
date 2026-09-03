@@ -150,6 +150,21 @@ effect 触发的是**该组件自己的渲染 effect**，只有该组件的 subt
 
 > 编译一次，执行多次。优化信息（block、patchFlag、静态提升）固化在 render 函数代码里，每次重渲染"免费"生效。
 
+### 3.3 diff 的完整职责（不止增删移）
+
+- **新旧 vnode 来源**：新树 = 本次 render 产物（`n2`）；旧树 = 组件实例的 `instance.subTree`（上次 render 产物，`n1`），每个 vnode 挂 `el` 指向真实 DOM。首次挂载 `n1 = null`，不走 diff 直接 mount
+- **同节点判定**：`isSameVNodeType` 比 `type + key`，不同 → 卸载旧 + 挂载新，不做子树对比
+- **复用**：同节点复用真实 DOM（`n2.el = n1.el`），组件复用实例——复用是 diff 的最大价值
+- **更新**：`patchProps` 按 patchFlag 靶向更新；事件用 invoker 机制换绑（不 removeEventListener）
+- **组件分流**：子组件 vnode 走 `updateComponent` 闸门（见第五节）
+- **卸载副作用**：`beforeUnmount`/`unmounted` 生命周期、指令钩子、ref 解绑、事件移除、transition 离场动画播完才移除 DOM
+- **挂载副作用**：创建 DOM、绑事件、设 ref、`mounted`、anchor 定位插入
+- **移动最小化**：keyed children 乱序用最长递增子序列（LIS）算出无需移动的节点，压到最少 DOM 移动次数
+- **静态跳过**：静态提升节点新旧引用相同，直接略过
+
+一句话：**diff 的目标是"最少 DOM 操作"，增删移只是 children 对比的三个分支，复用与靶向更新才是大头。**
+
+
 ---
 
 ## 四、Block 嵌套结构（追问高发区）

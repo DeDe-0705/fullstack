@@ -51,10 +51,15 @@
 ### 项目复盘（1份）
 - 项目复盘与面试话术.md — Li People/理想同事/组织信息管理/出入预约 STAR 话术
 
-## 模拟面试历史（7-8轮，按日期归档在 mock-interviews/）
+## 模拟面试历史（9+轮，按日期归档在 mock-interviews/）
 - 7/29：HTTP缓存/客户端存储/SSO+CSP/计算机网络/DNS-CDN/浏览器原理（6轮，35问）
 - 7/30：Promise与异步（1轮，8问+6轮深层复盘）
 - 7/31：HTML/CSS/ES6/JS基础（1轮，7问）
+- 9/2：React专场两轮（一轮：批处理/Fiber/Hooks手写/memo重渲染/并发特性/stale closure，24/30；二轮：合成事件/受控组件/RSC/Actions/Compiler/hydration，17/30）
+  - 术语精确性复发："Fiber更快"❌、"并发=防抖"❌；审题漏小问；stale closure第二解法没答出
+  - 二轮暴露最大盲区：React 19 整片（RSC/Actions/Compiler）——文档有但没消化
+  - 盲区已补录 React核心机制.md 第十三、十四章
+  - 下一步：React 19 专题重学 + 手撕代码日（虚拟列表/Promise 并发）
 
 ## 德德的能力画像（基于8轮模拟）
 

@@ -49,6 +49,64 @@ Promise.resolve().then(() => console.log('promise'))
 // (setTimeout 和 setImmediate 顺序不确定，取决于执行时机)
 ```
 
+#### 深入：setTimeout(0) vs setImmediate 到底差在哪？
+
+**先纠正一个误区**：`setTimeout > setImmediate` 不是铁律，两者没有固定先后，取决于代码运行在事件循环的哪个阶段。
+
+**为什么主模块里顺序不确定？** `setTimeout(fn, 0)` 的 `0` 会被强制 clamp 成 **≥1ms**。事件循环启动后先进 timers 阶段检查：若此刻距进程启动已过 1ms，则 setTimeout 先执行；否则跳过 timers 直接去 check 阶段跑 setImmediate——所以是"环境/时序的产物"，官方文档明确说 non-deterministic。
+
+**但放进 I/O 回调里，顺序必然反转：**
+
+```js
+const fs = require('fs')
+fs.readFile(__filename, () => {
+  setTimeout(() => console.log('timeout'), 0)
+  setImmediate(() => console.log('immediate'))
+})
+// 输出（100% 确定）：immediate → timeout
+```
+
+原因在 poll 阶段的职责：poll 负责「执行 I/O 回调 + 计算阻塞时长等待新 I/O」。I/O 回调在 poll 阶段执行，poll 结束后**按循环方向直接进入 check 阶段**（不是回头去 timers），所以：
+
+- 回调里注册的 `setImmediate` → 进 check 队列，一出门就到，立刻执行
+- 回调里注册的 `setTimeout(0)` → 进 timers 队列，但 timers 在"上一站"，要绕一整圈才轮到
+
+**两者语义对比：**
+
+| | `setTimeout(fn, 0)` | `setImmediate(fn)` |
+|---|---|---|
+| 真实延迟 | `0` 被 clamp 成 ≥1ms | 无额外延迟 |
+| 语义 | "至少 1ms 后执行" | "当前 poll 结束后尽快执行" |
+| 所属阶段 | timers | check |
+
+`setImmediate` 的诞生动机就是社区嫌弃 `setTimeout(fn, 0)` 语义不准确（有 1ms 最小值），需要一个"让出当前 tick、尽快继续"的精确表达。
+
+**生产里的两个典型用途：**
+
+```js
+// 1. 分片处理大任务，别饿死其他请求
+async function batchProcess(items) {
+  for (let i = 0; i < items.length; i++) {
+    process(items[i])
+    if (i % 1000 === 999) {
+      await new Promise(resolve => setImmediate(resolve)) // 主动让出
+    }
+  }
+}
+
+// 2. 递归展开，避免调用栈溢出（RangeError）
+function walk(node) {
+  doWork(node)
+  if (node.next) setImmediate(() => walk(node.next)) // 下一轮循环再继续，栈每轮清空
+}
+```
+
+#### process.nextTick 的坑：饿死事件循环
+
+`nextTick` 队列在「当前调用栈清空后、进入下一阶段前」处理，且**每个阶段之间都会先清空 nextTick 队列**，优先级高于 Promise 微任务。
+
+坑：在 nextTick 回调里递归调用 nextTick，队列永远清不空，事件循环走不到 I/O 阶段，进程看起来"卡死"。生产里禁止 nextTick 递归 nextTick。
+
 ### 1.2 CommonJS 模块系统
 
 ```js
@@ -81,6 +139,32 @@ readStream.pipe(writeStream)  // 边读边写，不占内存
 
 **四种 Stream 类型：** Readable / Writable / Duplex / Transform
 
+#### 背压（backpressure）— 读快写慢怎么办
+
+读流快、写流慢时，数据会在写流内部堆积。可写流内部有缓冲区，容量上限是 `highWaterMark`（默认 16KB）。
+
+**核心机制：**
+
+1. `write(chunk)` 返回 `false`：表示"这个 chunk 我收下了，但内部缓冲区已满，别再塞了"。注意不是写失败、数据没丢，只是缓冲区满了。
+2. 忽略返回值继续无脑读：读流源源不断产出，写不出去，chunk 全堆在写流缓冲区 → **内存无限增长 → OOM 崩溃**（不是主线程阻塞，是内存暴涨）。
+3. `drain` 事件：缓冲区被排空时触发。`write()` 返回 false 后，应 `pause()` 暂停读流，等 `drain` 再 `resume()` 恢复。
+
+**手写背压处理：**
+
+```js
+rs.on('data', (chunk) => {
+  const canContinue = ws.write(chunk)
+  if (!canContinue) {
+    rs.pause()                          // 写满了，暂停读
+    ws.once('drain', () => rs.resume()) // 排空了，恢复读
+  }
+})
+```
+
+**`pipe()` 内部已自动做背压**：`write()` 返回 false 就自动暂停源流，`drain` 时自动恢复。所以 `rs.pipe(ws)` 比自己写 `data + write` 更安全。
+
+**本质**：背压 = 让「生产速度」匹配「消费速度」，避免缓冲区无界增长。这个思想在限流 / 队列 / 削峰里会反复出现（呼应后面的 Redis、消息队列）。
+
 ### 1.4 Node.js 线程模型：单线程还是多线程？
 
 先说结论：**Node.js 不是「纯单线程」，而是「单线程的 JS 主线程 + 多层多线程」**。面试常见的「Node 是单线程」是个不严谨的说法，准确表述是「**开发者写的 JS 代码在单个主线程上串行执行**」。
@@ -97,6 +181,29 @@ readStream.pipe(writeStream)  // 边读边写，不占内存
 | libuv 线程池 | 默认 4 线程，处理阻塞 I/O 与计算（fs / crypto / DNS / zlib / 压缩） | ❌ 跑 C/C++ |
 | V8 内部线程 | GC 垃圾回收、JIT 编译 | ❌ |
 | worker_threads / cluster | 真正的 JS 并行 | ✅ |
+
+#### 网络 I/O vs 文件 I/O：异步的两种实现（易混）
+
+Node 的"异步"不是靠"另开线程跑你的 JS"，而是 **非阻塞 I/O + 事件通知**。但 I/O 分两类，实现方式完全不同：
+
+| 类型 | 谁在干 | 是否占线程池 |
+| --- | --- | --- |
+| 网络 I/O（socket / HTTP / TCP / UDP） | 操作系统内核的非阻塞多路复用（Linux epoll / macOS kqueue / Windows IOCP） | ❌ 不占 |
+| 文件 I/O（fs）、DNS、crypto、zlib | libuv 线程池（默认 4 线程），用线程阻塞等待模拟异步 | ✅ 占 |
+
+- **网络 I/O 不占线程池**：内核帮你监听所有 socket，有数据就绪就通知 libuv，libuv 再安排回调进事件循环。一个 JS 主线程就能同时监听数万连接——这是 Node 高并发的真正来源。
+- **文件 I/O 走线程池**：普通文件磁盘 I/O 没有可靠的内核非阻塞接口（epoll 也管不了磁盘文件），所以 libuv 用线程池模拟异步；默认只有 4 线程，文件操作多了会排队变慢。
+
+一句话：**你的 JS 永远只在主线程串行执行；"等待 I/O"这个动作发生在内核（网络）或线程池（文件/计算），就绪后由事件循环把回调调回主线程。**
+
+#### 同步 I/O vs 异步 I/O：主线程从不等待
+
+- **同步 I/O（`fs.readFileSync`）**：主线程**阻塞等待**直到 I/O 完成，期间整个事件循环被卡死，其他请求全部排队——这是要避免的。
+- **异步 I/O（`fs.readFile`）**：主线程发起后**立刻返回，不等待**，继续执行后续代码、处理其他事件；I/O 完成后回调才被塞回事件循环执行。
+
+**`await` 不是阻塞**：`await` 的语义是「把当前函数挂起（暂停）、让出主线程」，主线程转去跑别的任务；I/O 完成后函数再从 `await` 处恢复往下走。即 **挂起 + 让出 + 恢复**，不是"主线程停在那儿等"。
+
+一句话：**JS 主线程永远在"干活"，从不等待 I/O；所谓异步，就是把"等待"甩给内核/线程池，主线程继续跑，结果就绪后通过回调回到主线程接着处理。**
 
 #### 关键点
 
