@@ -58,6 +58,7 @@
 - [算法基础](./算法基础.md) — 排序(快排/归并)、树遍历、链表操作、动态规划入门、经典场景题
 - [手写代码](./手写代码.md) — 防抖节流、深拷贝、Promise.all/并发控制、LRU、bind/call/apply、虚拟列表、柯里化、继承
 - [手撕场景题](./手撕场景题.md) — 图片懒加载、搜索防抖竞态、文件分片上传/断点续传/秒传、无限滚动、虚拟列表、EventBus、状态管理、路由、WebSocket 重连、RAG 等 21 个完整实现 + 追问
+- [H5移动端场景题](./H5移动端场景题.md) — 状态栏/刘海屏适配(safe-area-inset+JSBridge)、100vh陷阱与dvh/svh、软键盘(visualViewport/iOS与Android差异)、1px边框、300ms延迟与点透、滚动穿透、WebView通信
 
 ## 五、项目与面试
 
