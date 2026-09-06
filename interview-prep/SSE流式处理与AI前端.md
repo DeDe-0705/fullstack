@@ -421,3 +421,68 @@ AI 逐字输出 Markdown，用户看到的效果：
 | 打字机效果卡顿？ | requestAnimationFrame 批量更新 + 节流渲染 + 虚拟列表 |
 | 长对话列表优化？ | 虚拟列表只渲染可视区域 + overscan 缓冲 |
 | AI 输出太慢前端能做什么？ | 首字时间优化（DNS预解析/HTTP3/预连接）+ 骨架屏 + 流式渲染 + 可取消机制 |
+
+---
+
+## 附录：大厂真实深挖题与标准答案（2026 面经归档）
+
+> 来源：德德收集的真实二面/三面追问题，以下为完整答案。
+
+### A1. 怎么判断 SSE 服务端断开？监听哪个事件？
+
+三层回答：
+1. **正常结束**：fetch 版 `reader.read()` 返回 `done: true`；或服务端约定标记（`data: [DONE]`）。EventSource 版服务端断流触发 **`onerror`**，`readyState` → CONNECTING（自动重连中）/ CLOSED
+2. **异常断开**：fetch promise reject / 流中途切断
+3. **假死检测（关键洞察）**：**TCP 连接没断 ≠ 流是活的**（代理/NAT 静默丢连接，两端收不到 FIN）→ 必须有**应用层心跳**：服务端每 15~30s 发 `: ping`（SSE 注释行）；客户端**看门狗**计时，超过 N 秒没收到任何字节（含心跳）→ 主动 abort + 重连
+
+断点续传：EventSource 靠 `id:` 字段 + 重连自动带 `Last-Event-ID` 头；fetch 版手动：指数退避（1s→2s→4s 封顶 30s + 抖动防惊群），重连带最后事件 id / 已生成文本长度。
+
+### A2. Markdown 分块渲染算法（为什么/怎么做/解决什么）
+
+**为什么**：流式输出时 Markdown 不完整（围栏未闭合/表格半截），每 token 全量 re-parse 是 O(n²)；paste 一万行则一次 parse + 上万 DOM 插入直接阻塞主线程。
+
+**拆块**：按**块级元素边界**切（空行/标题/代码块围栏/表格/列表），不按字符行切。流式场景分两类块：
+- 已完成块：边界确定 → parse 一次定稿，绝不重算
+- 未完成块（永远只有末尾一个）：随流增量重 parse，完成后落袋转正
+- 代码块特例：围栏未闭合按纯文本渲染，闭合后才高亮（防半截闪烁）
+
+**解决什么**：O(n²)→O(增量)；已完成块 DOM 稳定不回流不闪烁；配合 memo 组件前块全 bailout。
+
+**一万行 paste + 滚动卡死的组合拳**：
+1. 分帧渲染：rIC/rAF 每帧渲染 N 块，每帧预算 8ms
+2. 虚拟列表：视口内才挂载真实 DOM，视口外预估高度占位 + 渲染后校正滚动位置
+3. 语法高亮/parse 丢 Web Worker
+
+### A3. 每块怎么缓存？缓存策略？
+
+三层缓存：
+| 层 | 做法 | 目的 |
+|---|---|---|
+| 解析结果缓存 | `Map<内容hash, AST/HTML>`，内容没变直接命中 | 免重复 parse |
+| 组件层缓存 | 每块 `memo(Block)`，props 为块内容字符串，不变则 bailout | 免重复 render |
+| 容量控制 | **LRU** 上限（如 500 块），超长会话防内存膨胀 | 内存可控 |
+
+key = 块 index + 内容 hash：index 保证流式追加时前块 key 稳定，hash 保证内容变才重渲。
+
+### A4. requestIdleCallback 怎么检测被 block？怎么验证不卡主线程？
+
+```js
+requestIdleCallback((deadline) => {
+  while (deadline.timeRemaining() > 8 && queue.hasWork()) queue.doNext();
+  if (queue.hasWork()) requestIdleCallback(/* 继续 */);
+}, { timeout: 200 }); // 兜底防饿死
+```
+
+- **被 block 的信号**：`didTimeout` 频繁为 true / `timeRemaining()` ≈ 0 → 主线程繁忙
+- **主动度量**：**Long Tasks API**——`PerformanceObserver` 观察 `longtask` 条目（>50ms 任务）
+- **验证四步**：① Performance 面板看火焰图（长任务切成多帧碎片）；② Long Tasks 计数优化前 N 个 → 优化后 0；③ INP < 200ms / 60fps；④ **CPU 4x/6x 降频**模拟低端机复测
+- 话术：rIC 是"请求"空闲，Long Tasks 是"验证"空闲——一个调度一个度量
+
+### A5. Web Worker 通信与任务取舍
+
+- **通信**：`postMessage` + `onmessage`，自定义协议 `{ type, requestId, payload }`，requestId 对 Promise 回调表实现 Promise 化调用
+- **传参**：structured clone（对象/数组/Map/ArrayBuffer）；大数据用 **Transferable** 零拷贝转移所有权（`postMessage({buf}, [buf])`，传完主线程侧失效）
+- **消息类型**（5~8 种）：init / parse / result / progress / cancel / error
+- **移出的任务**：Markdown parse + 语法高亮、大列表 filter/sort、文件分片 MD5（spark-md5）、大 JSON parse、图片压缩
+- **判断标准（四条件同时满足）**：纯计算无 DOM + 数据可序列化 + 耗时 > 16ms + 可异步拿结果
+- **不能丢进去的**：① DOM/BOM 操作（Worker 无 document/window，硬限制）；② 需同步返回的（通信天然异步）；③ 小任务（序列化成本 > 计算本身）；④ 高频小消息（考虑 SharedArrayBuffer + Atomics，但需 COOP/COEP 跨域隔离，成本高）

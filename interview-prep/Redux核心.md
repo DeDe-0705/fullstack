@@ -339,3 +339,34 @@ extraReducers: (builder) => {
 - Redux 面试全解析（三大原则、纯函数）：https://www.yuque.com/guluguluwater-qkq0t/qbbqks/gc7gfphra19aezl7
 - Redux Toolkit 源码架构（createSlice/createAsyncThunk 三态）：https://juejin.cn/post/7521160007855095843
 - EasyInterview Redux 面试指南（createSlice action type、extraReducers）：https://easyinterview.me/blogs/the-interview-questions-that-matter/redux-interview-guide
+
+---
+
+## 附录：immer 与 createAsyncThunk 机理深挖（2026-09-06 面试盲区补档）
+
+### 1. immer 工作原理（三件套必背：Proxy + copy-on-write + 结构共享）
+
+`createSlice` 的 reducers 里 `state.count++` 不违反不可变原则——state 是 immer 的 draft：
+
+```
+produce(baseState, recipe)：
+1. draft = Proxy(baseState)
+2. recipe 里的写操作被 Proxy 拦截 → copy-on-write：
+   只复制【被修改路径上的节点】再改，未触碰的分支保持原引用
+3. 返回新对象 —— 结构共享（structural sharing）
+4. 特例：draft 未被修改 → 直接返回原 state（白送的 bailout）
+```
+
+一句话：写的是**可变语法**，产出的是**不可变更新**。
+
+### 2. Redux 为什么坚持不可变（根只有一条：引用比较）
+
+- **根本原因**：useSelector/connect 用 `===` 浅比较判断切片变没变。直接改原对象 → 引用不变 → 判定没变 → **UI 不更新**（Redux 最常见 bug）
+- 衍生好处（都建立在"引用变 = 内容变"上）：时间旅行调试、任意时点快照可信、memo/pure render 成立
+- immer 结构共享恰好保证该等式：没变的分支引用不变，变了的路径引用必新
+
+### 3. createAsyncThunk 三态为什么在 extraReducers
+
+- `pending/fulfilled/rejected` 是 thunk **运行时自动 dispatch** 的 action，不是组件手动 dispatch 的
+- `reducers` 收**本 slice 的同步 action**；`extraReducers` 收**外部 action**（thunk 三态、其他 slice 的 action）
+- 更本质：Redux 约定 **reducer 必须同步纯函数**，异步逻辑属于 action 层；三态是异步操作的生命周期事件，天然归 extraReducers

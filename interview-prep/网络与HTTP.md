@@ -583,3 +583,71 @@ OAuth 2.0 四种授权模式：
 | 微前端SSO | 主应用统一鉴权 → Props注入子应用，子应用零登录逻辑 |
 | CSP是什么 | 资源加载白名单，防XSS最后防线，10+指令覆盖所有资源类型 |
 | CSP怎么上线 | 先用 Report-Only 模式收集数据，稳定后切正式策略 |
+
+---
+
+## 附录：缓存/跨域/接口统计真实面经题（2026 归档）
+
+### B1. 多资源（JS/图片/字体）HTTP 缓存策略
+
+**核心原则：HTML 不缓存，带 hash 的静态资源长缓存，文件名即版本。**
+
+| 资源 | 策略 | 理由 |
+|---|---|---|
+| 入口 HTML | `no-cache`（每次协商）或 `no-store` | 发版立即生效——HTML 是所有资源的"目录" |
+| JS/CSS（contenthash） | `public, max-age=31536000, immutable` | 内容变 hash 变，天然缓存破坏 |
+| 图片 | 长缓存 30天~1年；无 hash 的用协商缓存（ETag/Last-Modified） | 更新频率低 |
+| 字体 | 长缓存 + immutable + 关键字体 preload | 几乎不变且阻塞首屏 |
+| 接口数据 | 默认 no-store；可缓存的 private + 短 max-age | 时效性优先 |
+| CDN 层 | 静态资源边缘缓存 + HTML 回源 | 配合上述 headers |
+
+加分点：`immutable` = 告诉浏览器"此 URL 内容永不变"，刷新页面连协商请求都不发。
+
+### B2. axios 统计接口耗时 + 10 个 API 平均/最慢 URL
+
+```js
+axios.interceptors.request.use((config) => {
+  config.metadata = { startTime: performance.now() };
+  return config;
+});
+axios.interceptors.response.use(
+  (res) => { report(res.config.url, performance.now() - res.config.metadata.startTime); return res; },
+  (err) => { report(err.config?.url, performance.now() - err.config.metadata.startTime, { failed: true }); return Promise.reject(err); }
+);
+
+const stats = new Map(); // url -> { total, count, max }
+function report(url, d) {
+  const s = stats.get(url) ?? { total: 0, count: 0, max: 0 };
+  s.total += d; s.count++; s.max = Math.max(s.max, d);
+  stats.set(url, s);
+}
+// 平均 = total / count；最慢 = 遍历取 max 最大
+```
+
+加分点：① **URL 归一化**（/user/123 → /user/:id，否则报表爆炸）；② 细分 DNS/TCP/TTFB 用 Resource Timing API；③ 失败请求单独统计不计入平均；④ 采样 + 批量 + sendBeacon 上报（页面卸载也能发）。
+
+### B3. 对方系统不支持 OPTIONS 怎么绕 CORS
+
+先纠坑：CORS 是**浏览器**的安全机制。非简单请求（自定义 header / Content-Type: application/json / PUT/DELETE）触发 preflight OPTIONS，响应缺 `Access-Control-Allow-*` 就被拦。
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| ① 服务端代理（正解） | 前端请求同源网关/BFF，Nginx/Node 转发到 B——跨域在服务端间不存在 | 生产标准答案 |
+| ② Nginx 补 CORS | B 前面的 Nginx 统一加 Access-Control-Allow-*，OPTIONS 直接 204 | B 不用改代码 |
+| ③ 降级简单请求 | 去自定义 header + Content-Type 改 form-urlencoded/text/plain → 不发 preflight | 妥协；token 只能放 query/body |
+| ④ JSONP | 仅 GET，XSS 风险 | 历史方案，知道演进即可 |
+| ⑤ WebSocket | 不受同源策略限制 | 特殊双向场景 |
+
+收尾："生产正解永远是网关统一处理跨域，前端 hack 都是技术债；服务端之间通信根本没有跨域概念。"
+
+### B4. JS 缓存没更新，用户一直拿旧版，线上 bug 怎么修
+
+**止血**：① CDN purge 入口 HTML 缓存；② 严重就回滚（旧 hash 文件还在 CDN，回滚 HTML 即恢复）；③ 已中毒用户：前端版本检测轮询，不一致提示/强制刷新。
+
+**根治四条**：
+1. HTML 必须 no-cache/no-store，每次回源拿最新"目录"
+2. 静态资源 contenthash + immutable 长缓存——内容变 hash 变，旧文件留着无害
+3. **发版顺序：静态资源先上 CDN，再发 HTML**——保证任何时刻 HTML 引用的文件都存在（反了会 404 白屏）
+4. 有 Service Worker：SW 自身也有缓存 → skipWaiting + clientsClaim + 版本变化提示刷新
+
+一句话：hash 文件名 + HTML 不缓存的设计下，这事故机制上就不该发生——出了就是缓存头配置或发版顺序错了。

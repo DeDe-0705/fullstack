@@ -1378,3 +1378,22 @@ useEffect(() => {
 - hydration = 服务端静态 HTML 先到屏 → 客户端重新执行组件绑事件；mismatch 本质 = hydrate 渲染树与服务端 HTML 不一致，无法安全复用 DOM → 整树重渲（SSR 白做）
 - 病灶模式：**渲染期读取"两端环境不同的值"**——localStorage/window、Date.now()/new Date()、Math.random()
 - 修复原则统一：这些值挪到 **useEffect**（useState 占位 → 挂载后 setState），保证首次渲染两端一致；时间戳类可用官方 `suppressHydrationWarning`
+
+---
+
+## 附录：副作用的理解与使用原则（面经归档）
+
+> 面试官："你怎么理解副作用？useEffect / watch 使用时注意什么？"
+
+**定义**：渲染是纯函数（props/state → UI），副作用是渲染之外的一切——请求、订阅、定时器、手动 DOM 操作、localStorage、日志。
+
+**五条注意（按重要性）**：
+1. **依赖要诚实**：依赖数组写全（exhaustive-deps）；漏依赖 = stale closure 读旧值，Hooks 最高频 bug
+2. **必须可清理**：订阅/定时器/请求在 cleanup 里清（请求用 AbortController），否则内存泄漏 + 竞态
+3. **effect 是「同步外部系统」，不是事件响应**：派生状态别放 effect（useMemo/渲染期算）；能在事件处理里做的别放 effect（官方 *You Might Not Need an Effect*）
+4. **执行时机**：useEffect 在 paint 后异步执行；需同步 DOM 测量/防视觉闪烁用 useLayoutEffect（阻塞渲染，慎用）
+5. **竞态**：effect 里发请求，依赖变化时旧请求可能后回来 → cleanup 里 abort 或打标记忽略过期响应
+
+**Vue watch 对应版**：能 computed 派生的别 watch；注意 deep 递归成本、immediate 时机；watchEffect 自动收集依赖 + onCleanup 清理——同一套心智。
+
+**收尾升华**：副作用要**可清理、可重放、最小化**——StrictMode 双调用 effect 不死，说明副作用写健康了。

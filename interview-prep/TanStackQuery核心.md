@@ -212,3 +212,31 @@ export const queryClient = new QueryClient({
 5. **mutate 和 mutateAsync 区别？** → mutate 返回 undefined，mutateAsync 返回 Promise。
 6. **staleTime 和 gcTime 区别？** → staleTime 决定数据多久变陈旧（触发后台刷新，不清缓存）；gcTime 决定缓存多久后被回收（只在无订阅者时计时）。
 7. **QueryClient 是什么？** → 中央缓存管理器，负责缓存、失效、预取，通过 QueryClientProvider 注入。
+
+---
+
+## 附录：竞态隔离与占位数据（2026-09-06 面试盲区补档）
+
+### 1. Query 天然处理竞态的机制：queryKey 隔离（不是 AbortController！）
+
+```js
+useQuery({
+  queryKey: ['search', keyword],  // keyword 变 = 换一个缓存槽位
+  queryFn: ({ signal }) => fetch(`/api/search?q=${keyword}`, { signal }).then(r => r.json()),
+});
+```
+
+- 快速输入时每个关键词是**独立缓存槽位**：旧请求（如「手环」）响应回来写入的是旧槽位 `['search','手环']`，而组件当前订阅 `['search','小米手环']`——**读不到旧数据，错乱在数据结构上不存在**
+- `signal` 是 queryFn context 自带的 AbortSignal，传给 fetch 后 Query 会在查询失效/重新发起时**自动 abort**——作用是**省带宽**，不是防错乱
+- 准确表述：取消逻辑不用手写（传 signal 即可）；竞态正确性由 queryKey 隔离保证，取消只是优化
+
+### 2. placeholderData：旧数据占位防闪烁
+
+```js
+import { keepPreviousData } from '@tanstack/react-query';
+useQuery({ queryKey: ['search', keyword], queryFn, placeholderData: keepPreviousData });
+// v4 写法：keepPreviousData: true；v5 函数式：placeholderData: (prev) => prev
+```
+
+- 新 key 数据未回前**继续展示上一 key 的数据**，列表不闪空 loading
+- **术语精确**：`placeholderData` 只是占位展示，**不写入缓存**；`initialData` 会当真数据写进缓存——两者别混

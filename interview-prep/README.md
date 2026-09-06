@@ -36,6 +36,8 @@
 - [前端性能监控与线上定位](./前端性能监控与线上定位.md) — 埋点平台指标观测、RUM 指标体系、Navigation/Resource Timing 拆段、iOS 偶发慢多维归因、线上排障话术
 - [Docker与K8s部署](./Docker与K8s部署.md) — Docker镜像/分层/底层原理(namespace+cgroups)、Dockerfile多阶段构建、Compose编排、K8s架构与部署、CI/CD/GitOps
 
+- [前端测试-TDD实战](./前端测试-TDD实战.md) — xDD 全家桶辨析（TDD/BDD/CDD/ATDD）、红绿重构实操（formatThousands/chunk 案例）、client/ vitest 基建、前端 TDD 适用范围与面试话术（2026-09-06）
+- [前端测试-BDD与E2E](./前端测试-BDD与E2E.md) — E2E 工具演进（Selenium→Cypress→Playwright）、Cucumber 零件vs整车、playwright-bdd 三层文件模型、feature 编写规范、产物目录分工、AI 协作流、双 MCP 调试体系（Playwright MCP 操作 + Chrome DevTools MCP 诊断）、完整 AI 工作流闭环、flaky 治理（2026-09-06）
 - [SSE流式处理与AI前端](./SSE流式处理与AI前端.md) — 2026大厂新增独立考点：SSE vs WebSocket、Fetch+ReadableStream、粘包半包、断线重连+指数退避、流式Markdown增量渲染、打字机性能优化
 
 ## 四、进阶专题

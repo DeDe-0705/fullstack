@@ -311,3 +311,42 @@ const selectedMatch = [...matches]
 - React Router 官方文档《Using handle》：`handle` + `useMatches` 的元数据扩展模式
 - React Router v7 迁移与 Data Mode 教程：`createBrowserRouter`、`loader`、三种模式
 - 2025–2026 状态管理趋势：服务端状态用 TanStack Query、客户端状态用 Zustand/Context、表单用 RHF
+
+---
+
+## 附录：订阅机制深挖（2026-09-06 模拟面试盲区补档）
+
+> 高频追问链：为什么不用 Provider → 怎么精确订阅 → 多字段订阅的坑 → 并发模式下为什么会 tearing
+
+### 1. 无 Provider 的原因
+
+Zustand 的 store 是**模块级单例**——存在于 React 树之外的 JS 模块中，hook 直接引用。Redux 的 Provider 本质也只是透传 store 实例，Zustand 省掉了这层。
+
+### 2. 精确订阅与 useShallow（必背）
+
+```js
+// ❌ 不传 selector = 订阅整个 store，任何字段变化都重渲染
+const { user } = useStore();
+
+// ✅ selector 精确订阅：只有 user 引用变化才重渲染
+const user = useStore((s) => s.user);
+
+// ❌ 新陷阱：selector 每次返回【新对象】→ Object.is 比较必然不等 → 每次都重渲染
+const { user, theme } = useStore((s) => ({ user: s.user, theme: s.theme }));
+
+// ✅ useShallow 浅比较：字段引用都没变 → 复用旧引用 → 不重渲染
+import { useShallow } from 'zustand/react/shallow';
+const { user, theme } = useStore(useShallow((s) => ({ user: s.user, theme: s.theme })));
+```
+
+**机理链（能背）**：store 变化 → selector 重新执行 → 返回值与上次做 `Object.is` 比较 → 不等才触发重渲染。返回新对象必不等 → useShallow 换成逐项浅比较。
+
+**术语**：Zustand 的选择器是 hook 的第一个参数；`useSelector` 是 react-redux 的 API，别混用。
+
+### 3. 底层：useSyncExternalStore 防 tearing（必背）
+
+- Zustand 组件订阅底层 = React 18 的 **`useSyncExternalStore`**
+- **tearing（撕裂）**：外部 store 不受 React 调度控制，并发渲染可中断——渲染到一半 store 变了，已渲染部分用旧值、未渲染部分用新值 → 同一次提交 UI 数据不一致
+- **机制**：渲染时读 `getSnapshot()`，提交前再检查一次，渲染期间 store 变了就**丢弃本次渲染重来**——用同步化保证一致性
+
+**记忆锚点**：Zustand = 模块级外部 store + 发布订阅 + useSyncExternalStore 防 tearing。
