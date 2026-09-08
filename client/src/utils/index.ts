@@ -50,3 +50,35 @@ export function lazyLoadImages () {
   }, { rootMargin: '100px' })
   images.forEach(img => observer.observe(img))
 }
+
+
+export class Person {
+  public name: string
+  private queue: Promise<void> = Promise.resolve()
+  constructor(name: string) {
+    this.name = name
+  }
+  sayHi () {
+    this.queue = this.queue.then(() => {
+      console.log(`Hi, I'm ${this.name}`)
+    })
+    return this
+  }
+  sleep (time: number) {
+    this.queue = this.queue.then(() => {
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          console.log(`${this.name} slept for ${time} seconds`)
+          resolve()
+        }, time * 1000)
+      })
+    })
+    return this
+  }
+  eat () {
+    this.queue = this.queue.then(() => {
+      console.log(`${this.name} is eating`)
+    })
+    return this
+  }
+}

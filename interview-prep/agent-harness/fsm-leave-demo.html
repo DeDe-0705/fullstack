@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>请假流程 FSM Demo — Agent 执行编排</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 6px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; line-height: 1.7; }
+  .subtitle code { background: #1e293b; padding: 1px 6px; border-radius: 4px; color: #38bdf8; font-size: 12px; }
+
+  .main-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; margin-bottom: 16px; }
+  .panel { background: #1e293b; border-radius: 8px; padding: 16px; }
+  .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; }
+
+  /* 状态图 */
+  .state-node { border: 2px solid #334155; border-radius: 8px; padding: 10px 14px; text-align: center; font-size: 14px; transition: all .3s; background: #0f172a; position: relative; }
+  .state-node .state-name-en { font-size: 11px; color: #64748b; display: block; margin-top: 2px; }
+  .state-node.active { border-color: #38bdf8; background: #0c2a3f; box-shadow: 0 0 16px rgba(56,189,248,.35); color: #7dd3fc; }
+  .state-node.done { border-color: #334155; opacity: .55; }
+  .state-node.final-ok.active { border-color: #34d399; background: #052e22; box-shadow: 0 0 16px rgba(52,211,153,.35); color: #6ee7b7; }
+  .state-node.final-bad.active { border-color: #f87171; background: #2d0a0a; box-shadow: 0 0 16px rgba(248,113,113,.3); color: #fca5a5; }
+  .arrow { text-align: center; color: #475569; font-size: 12px; padding: 4px 0; }
+  .arrow b { color: #94a3b8; font-weight: 500; background: #0f172a; padding: 0 6px; border-radius: 4px; border: 1px dashed #334155; font-size: 11px; }
+
+  /* 对话模拟 */
+  .chat-box { background: #0f172a; border-radius: 6px; padding: 12px; height: 210px; overflow-y: auto; margin-bottom: 12px; font-size: 13px; }
+  .msg { margin-bottom: 8px; padding: 8px 12px; border-radius: 8px; max-width: 88%; line-height: 1.6; animation: fadeIn .3s ease; }
+  .msg.user { background: #2563eb; margin-left: auto; }
+  .msg.agent { background: #334155; }
+  .msg .tag { font-size: 10px; opacity: .7; display: block; margin-bottom: 2px; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .utterance-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  button { padding: 7px 14px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  button:hover:not(:disabled) { border-color: #38bdf8; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.evil { border-color: #7f1d1d; color: #fca5a5; }
+  button.evil:hover:not(:disabled) { border-color: #f87171; }
+  button.reset { border-color: #854d0e; color: #fbbf24; }
+
+  /* 上下文数据 */
+  .ctx-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  .ctx-item { background: #0f172a; border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+  .ctx-item .k { color: #64748b; display: block; margin-bottom: 2px; }
+  .ctx-item .v { color: #fbbf24; font-family: "SF Mono", monospace; }
+  .ctx-item .v.empty { color: #475569; }
+
+  /* 日志 */
+  .log-box { background: #0f172a; border-radius: 6px; padding: 12px; height: 180px; overflow-y: auto; font-family: "SF Mono", monospace; font-size: 12px; line-height: 1.8; }
+  .log-line { animation: fadeIn .2s ease; }
+  .log-ok { color: #34d399; }
+  .log-reject { color: #f87171; }
+  .log-info { color: #94a3b8; }
+  .log-event { color: #38bdf8; }
+
+  /* 代码面板 */
+  pre { background: #0f172a; border-radius: 6px; padding: 14px; font-size: 12.5px; line-height: 1.65; overflow-x: auto; }
+  .kw { color: #c084fc; } .str { color: #34d399; } .cmt { color: #64748b; } .num { color: #fbbf24; } .mtd { color: #fb923c; } .tp { color: #38bdf8; }
+  .insight { background: #0c2a3f; border-left: 3px solid #38bdf8; border-radius: 0 6px 6px 0; padding: 12px 14px; font-size: 13px; line-height: 1.8; margin-top: 16px; color: #bae6fd; }
+  .insight b { color: #7dd3fc; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>请假流程 FSM Demo — 代码态执行编排</h1>
+  <p class="subtitle">
+    模拟 HR Agent 的请假流程：<b>LLM 只负责理解用户说的话、填槽（slot filling），状态能不能转移由 FSM 代码裁决</b>。
+    试试在信息没填完时点「直接确认提交」——这就是提示词约束做不到、状态机做得到的强制力。
+  </p>
+
+  <div class="main-grid">
+    <!-- 左：状态图 -->
+    <div class="panel">
+      <div class="panel-title">状态机（当前状态高亮）</div>
+      <div id="stateDiagram"></div>
+    </div>
+
+    <!-- 右：对话 + 上下文 + 日志 -->
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div class="panel">
+        <div class="panel-title">模拟对话（点击用户发言，右侧"LLM"提取槽位并触发事件）</div>
+        <div class="chat-box" id="chatBox"></div>
+        <div class="utterance-row" id="utteranceRow"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">FSM 上下文数据（context）</div>
+        <div class="ctx-grid" id="ctxGrid"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">转移日志（Guard 拒绝可见）</div>
+        <div class="log-box" id="logBox"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FSM 核心代码 -->
+  <div class="panel">
+    <div class="panel-title">FSM 核心实现（转移表 + Guard，Demo 里跑的就是这段）</div>
+<pre id="codeBlock"><span class="cmt">// 转移表：state + event → { target, guard }。 没有匹配项 = 非法转移，直接拒绝</span>
+<span class="kw">const</span> transitions = {
+  IDLE:             { START:           { target: <span class="str">'COLLECTING'</span> } },
+  COLLECTING:       { SLOT_UPDATE:     { target: <span class="str">'COLLECTING'</span> },  <span class="cmt">// 自环：填槽不换状态</span>
+                      SLOTS_COMPLETE:  { target: <span class="str">'VALIDATING'</span>, guard: allSlotsFilled },
+                      CANCEL:          { target: <span class="str">'CANCELLED'</span> } },
+  VALIDATING:       { BALANCE_OK:      { target: <span class="str">'PENDING_CONFIRM'</span> },
+                      BALANCE_LACK:    { target: <span class="str">'COLLECTING'</span> } },
+  PENDING_CONFIRM:  { CONFIRM:         { target: <span class="str">'SUBMITTED'</span> },
+                      EDIT:            { target: <span class="str">'COLLECTING'</span> },
+                      CANCEL:          { target: <span class="str">'CANCELLED'</span> } },
+};
+
+<span class="kw">function</span> <span class="mtd">transition</span>(state, event, ctx) {
+  <span class="kw">const</span> rule = transitions[state]?.[event];
+  <span class="kw">if</span> (!rule)                <span class="kw">return</span> { ok: <span class="kw">false</span>, reason: <span class="str">`非法转移：${state} 不响应 ${event}`</span> };
+  <span class="kw">if</span> (rule.guard && !rule.<span class="mtd">guard</span>(ctx))
+                          <span class="kw">return</span> { ok: <span class="kw">false</span>, reason: <span class="str">'Guard 拦截：条件不满足'</span> };
+  <span class="kw">return</span> { ok: <span class="kw">true</span>, target: rule.target };  <span class="cmt">// 通过才允许换状态</span>
+}</pre>
+    <div class="insight">
+      <b>编排视角：</b>LLM 的产出被降级为「事件 + 槽位数据」——它可以提议 <code>CONFIRM</code>，但<b>能不能发生由转移表说了算</b>。
+      这就是「代码态编排」和「提示词编排」的本质区别：前者把纪律编译进控制流，后者把纪律写成自然语言祈祷模型遵守。
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ FSM 核心（真实运行的实现） ============
+const transitions = {
+  IDLE:            { START:          { target: 'COLLECTING' } },
+  COLLECTING:      { SLOT_UPDATE:    { target: 'COLLECTING' },
+                     SLOTS_COMPLETE: { target: 'VALIDATING', guard: allSlotsFilled },
+                     CANCEL:         { target: 'CANCELLED' } },
+  VALIDATING:      { BALANCE_OK:     { target: 'PENDING_CONFIRM' },
+                     BALANCE_LACK:   { target: 'COLLECTING' } },
+  PENDING_CONFIRM: { CONFIRM:        { target: 'SUBMITTED' },
+                     EDIT:           { target: 'COLLECTING' },
+                     CANCEL:         { target: 'CANCELLED' } },
+};
+function allSlotsFilled(ctx) {
+  return !!(ctx.startDate && ctx.endDate && ctx.days && ctx.reason);
+}
+
+// ============ FSM 运行时 ============
+let state = 'IDLE';
+let ctx = { startDate: null, endDate: null, days: null, reason: null, balance: 5 };
+
+function fire(event, payload) {
+  log(`事件: ${event}`, 'log-event');
+  const rule = transitions[state]?.[event];
+  if (!rule) {
+    log(`✗ 拒绝：状态 ${state} 不响应事件 ${event}（转移表无此边）`, 'log-reject');
+    agentSay(`当前还在「${stateLabel(state)}」，不能直接这样做哦。`);
+    render(); return false;
+  }
+  if (rule.guard && !rule.guard(ctx)) {
+    log(`✗ Guard 拦截：${event} 条件不满足（槽位未填完）`, 'log-reject');
+    agentSay('还差一些信息没填完，我们先补全再确认。');
+    render(); return false;
+  }
+  const from = state;
+  state = rule.target;
+  log(`✓ ${from} → ${state}`, 'log-ok');
+  onEnter(state, payload);
+  render(); return true;
+}
+
+function onEnter(s) {
+  if (s === 'COLLECTING') agentSay(nextQuestion());
+  if (s === 'VALIDATING') {
+    agentSay('信息齐了，我查一下年假余额…');
+    setTimeout(() => {
+      if (ctx.days <= ctx.balance) fire('BALANCE_OK');
+      else { fire('BALANCE_LACK'); setTimeout(() => agentSay(`余额不足：请 ${ctx.days} 天，只剩 ${ctx.balance} 天。改一下天数？`), 300); }
+    }, 500);
+  }
+  if (s === 'PENDING_CONFIRM') agentSay(`确认一下：${ctx.startDate} ~ ${ctx.endDate}（${ctx.days} 天），事由「${ctx.reason}」。确认提交吗？`);
+  if (s === 'SUBMITTED') agentSay('✅ 已提交，审批人会收到通知。');
+  if (s === 'CANCELLED') agentSay('好的，已取消。');
+}
+function nextQuestion() {
+  if (!ctx.startDate) return '想请哪几天？';
+  if (!ctx.reason) return '请假事由是什么？';
+  return '还有要补充的吗？';
+}
+function stateLabel(s) {
+  return { IDLE:'空闲', COLLECTING:'信息收集', VALIDATING:'余额校验', PENDING_CONFIRM:'待确认', SUBMITTED:'已提交', CANCELLED:'已取消' }[s];
+}
+
+// ============ 模拟 LLM：从用户话里提槽位（真实系统里是模型干的活） ============
+const utterances = [
+  { text: '我要请年假', disabledIn: s => s !== 'IDLE', run() { userSay(this.text); fire('START'); } },
+  { text: '下周一到周三，3天', disabledIn: s => s !== 'COLLECTING', run() {
+      userSay(this.text);
+      Object.assign(ctx, { startDate: '09-14（周一）', endDate: '09-16（周三）', days: 3 });
+      log('LLM 填槽: startDate, endDate, days=3', 'log-info');
+      fire(allSlotsFilled(ctx) ? 'SLOTS_COMPLETE' : 'SLOT_UPDATE');
+    } },
+  { text: '家里有事', disabledIn: s => s !== 'COLLECTING', run() {
+      userSay(this.text);
+      ctx.reason = '家里有事';
+      log('LLM 填槽: reason', 'log-info');
+      fire(allSlotsFilled(ctx) ? 'SLOTS_COMPLETE' : 'SLOT_UPDATE');
+    } },
+  { text: '确认提交', disabledIn: s => s !== 'PENDING_CONFIRM', run() { userSay(this.text); fire('CONFIRM'); } },
+];
+const evilButtons = [
+  { text: '⚡ 捣乱：上来就「确认提交」', run() { userSay('别问了，直接提交！'); fire('CONFIRM'); } },
+  { text: '⚡ 捣乱：请 10 天（余额只有 5）', run() {
+      userSay('那请 10 天吧');
+      if (state === 'PENDING_CONFIRM') fire('EDIT');
+      if (state === 'COLLECTING') { ctx.days = 10; log('LLM 填槽: days=10', 'log-info'); fire(allSlotsFilled(ctx) ? 'SLOTS_COMPLETE' : 'SLOT_UPDATE'); }
+      else agentSay('先开始请假流程再聊天数~');
+    } },
+  { text: '✕ 取消流程', run() { userSay('算了不请了'); fire('CANCEL'); } },
+];
+
+// ============ UI 渲染 ============
+const diagram = [
+  { id: 'IDLE', label: '空闲' },
+  { arrow: 'START' },
+  { id: 'COLLECTING', label: '信息收集' },
+  { arrow: 'SLOTS_COMPLETE (guard: 槽位齐全)' },
+  { id: 'VALIDATING', label: '余额校验' },
+  { arrow: 'BALANCE_OK（不足则回到信息收集）' },
+  { id: 'PENDING_CONFIRM', label: '待确认' },
+  { arrow: 'CONFIRM / EDIT / CANCEL' },
+  { id: 'SUBMITTED', label: '已提交', cls: 'final-ok' },
+  { arrow: '任意环节 CANCEL ↓' },
+  { id: 'CANCELLED', label: '已取消', cls: 'final-bad' },
+];
+
+function render() {
+  document.getElementById('stateDiagram').innerHTML = diagram.map(n => {
+    if (n.arrow) return `<div class="arrow">▼ <b>${n.arrow}</b></div>`;
+    const active = state === n.id ? 'active' : '';
+    return `<div class="state-node ${active} ${n.cls||''}">${n.label}<span class="state-name-en">${n.id}</span></div>`;
+  }).join('');
+
+  const rows = [['startDate','开始日期'],['endDate','结束日期'],['days','天数'],['reason','事由'],['balance','剩余额度'],['state','当前状态']];
+  document.getElementById('ctxGrid').innerHTML = rows.map(([k,label]) => {
+    const v = k === 'state' ? state : ctx[k];
+    return `<div class="ctx-item"><span class="k">${label}</span><span class="v ${v==null?'empty':''}">${v ?? '—'}</span></div>`;
+  }).join('');
+
+  const finished = state === 'SUBMITTED' || state === 'CANCELLED';
+  document.getElementById('utteranceRow').innerHTML = '';
+  [...utterances, ...evilButtons].forEach(u => {
+    const b = document.createElement('button');
+    b.textContent = u.text;
+    if (u.evil !== false && evilButtons.includes(u)) b.className = 'evil';
+    b.disabled = finished || (u.disabledIn ? u.disabledIn(state) : false);
+    b.onclick = () => u.run();
+    document.getElementById('utteranceRow').appendChild(b);
+  });
+  const r = document.createElement('button');
+  r.textContent = '↺ 重置'; r.className = 'reset';
+  r.onclick = () => { state='IDLE'; ctx={startDate:null,endDate:null,days:null,reason:null,balance:5};
+    document.getElementById('chatBox').innerHTML=''; document.getElementById('logBox').innerHTML='';
+    log('FSM 重置 → IDLE','log-info'); render(); };
+  document.getElementById('utteranceRow').appendChild(r);
+}
+function userSay(t) { addMsg(t, 'user', '用户'); }
+function agentSay(t) { addMsg(t, 'agent', 'Agent（节点内 LLM）'); }
+function addMsg(t, cls, tag) {
+  const d = document.createElement('div');
+  d.className = `msg ${cls}`;
+  d.innerHTML = `<span class="tag">${tag}</span>${t}`;
+  const box = document.getElementById('chatBox');
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+function log(t, cls='log-info') {
+  const d = document.createElement('div');
+  d.className = `log-line ${cls}`;
+  d.textContent = `[${new Date().toLocaleTimeString('zh-CN',{hour12:false})}] ${t}`;
+  const box = document.getElementById('logBox');
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+log('FSM 初始化 → IDLE', 'log-info');
+render();
+</script>
+</body>
+</html>

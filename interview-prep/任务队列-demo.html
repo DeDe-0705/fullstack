@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务队列 / 异步链 Person 实现</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 24px; max-width: 720px; }
+  pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow: auto; }
+  #out { background: #0d1117; color: #7ee787; padding: 12px; border-radius: 6px;
+         min-height: 80px; font-family: monospace; white-space: pre-wrap; }
+  button { padding: 8px 14px; margin: 4px 8px 4px 0; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h3>链式调用 + 任务队列 + 异步事件（sleep 模拟阻塞等待）</h3>
+  <pre id="code"></pre>
+
+  <div>
+    <button id="run1">run: person.sayHi()</button>
+    <button id="run2">run: person.sayHi().sleep(5).eat()</button>
+    <button id="clear">清空输出</button>
+  </div>
+
+  <div id="out"></div>
+
+  <script>
+    // ---------- 实现 ----------
+    class Person {
+      constructor(name) {
+        this.name = name;
+        this._tasks = [];       // 任务队列
+        this._running = false;  // 消费守卫，防止重复启动导致乱序
+      }
+      _push(fn) { this._tasks.push(fn); this._kick(); }
+      async _kick() {
+        if (this._running) return;
+        this._running = true;
+        while (this._tasks.length) {
+          const fn = this._tasks.shift();
+          await fn();           // 串行消费，sleep 的唯一一个 await 会真正等待
+        }
+        this._running = false;
+      }
+      sayHi() { this._push(() => log(`hello, i am ${this.name}`)); return this; }
+      sleep(sec) {
+        this._push(() => new Promise((res) =>
+          setTimeout(() => { log('wake up'); res(); }, sec * 1000)
+        ));
+        return this;
+      }
+      eat() { this._push(() => log('eat！')); return this; }
+    }
+
+    // ---------- 输出工具 ----------
+    const out = document.getElementById('out');
+    function log(msg) {
+      out.textContent += msg + '\n';
+      console.log(msg);
+    }
+
+    document.getElementById('run1').onclick = () => new Person('jack').sayHi();
+    document.getElementById('run2').onclick = () => new Person('jack').sayHi().sleep(5).eat();
+    document.getElementById('clear').onclick = () => { out.textContent = ''; };
+
+    document.getElementById('code').textContent =
+`const person = new Person('jack');
+person.sayHi();                    // hello, i am jack
+person.sayHi().sleep(5).eat();
+// hello, i am jack
+// （等待5秒）wake up
+// eat！`;
+  </script>
+</body>
+</html>

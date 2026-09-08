@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSE 打字机 + 行级增量渲染对比 Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; background: #1e293b; border-radius: 8px; padding: 14px 16px; }
+  button { padding: 8px 16px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  button:hover:not(:disabled) { border-color: #38bdf8; }
+  button.run { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  button.run:hover:not(:disabled) { background: #1d4ed8; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  select { padding: 7px 10px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; border-radius: 6px; font-size: 13px; }
+  .ctl-label { font-size: 12px; color: #64748b; }
+
+  .pipeline { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #94a3b8; display: flex; gap: 6px; align-items: center; }
+  .chip b { color: #38bdf8; font-family: "SF Mono", monospace; font-weight: 600; }
+  .chip .mono { font-family: "SF Mono", monospace; color: #e2e8f0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+  .arrow { color: #475569; align-self: center; }
+
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .compare-grid { grid-template-columns: 1fr; } }
+
+  .pane { background: #1e293b; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
+  .pane.bad { border-top: 3px solid #f87171; }
+  .pane.good { border-top: 3px solid #34d399; }
+  .pane-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .pane-title { font-size: 14px; font-weight: 600; }
+  .pane.bad .pane-title { color: #fca5a5; }
+  .pane.good .pane-title { color: #6ee7b7; }
+  .pane-tag { font-size: 11px; color: #64748b; }
+  .metrics { display: flex; gap: 14px; font-size: 11px; color: #64748b; margin-bottom: 10px; flex-wrap: wrap; }
+  .metrics b { color: #fbbf24; font-family: "SF Mono", monospace; font-weight: 600; }
+  .doc { background: #0f172a; border-radius: 6px; padding: 14px; min-height: 380px; max-height: 380px; overflow-y: auto; font-size: 13.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; transition: background .12s; }
+  .doc.flash-all { animation: flashAll .25s ease; }
+  @keyframes flashAll { 0% { background: rgba(248,113,113,.18); } 100% { background: #0f172a; } }
+  .active-line { background: rgba(52,211,153,.12); border-radius: 3px; animation: flashActive .3s ease; }
+  @keyframes flashActive { 0% { background: rgba(52,211,153,.3); } 100% { background: rgba(52,211,153,.12); } }
+
+  .doc h1l, .md-h1 { display: block; font-size: 17px; font-weight: 700; color: #93c5fd; margin: 6px 0 4px; }
+  .md-h2 { display: block; font-size: 15px; font-weight: 600; color: #93c5fd; margin: 6px 0 4px; }
+  .md-li { display: block; padding-left: 14px; position: relative; }
+  .md-li::before { content: "•"; position: absolute; left: 2px; color: #38bdf8; }
+  .md-code { display: block; font-family: "SF Mono", monospace; font-size: 12.5px; color: #a5f3fc; }
+  .md-code-line { display: block; font-family: "SF Mono", monospace; font-size: 12.5px; color: #a5f3fc; }
+  .md-codeblock { background: #16202e; border: 1px solid #1e3a4c; border-radius: 4px; padding: 2px 8px; }
+  strong { color: #fbbf24; }
+  code.inl { background: #334155; border-radius: 3px; padding: 0 4px; font-size: 12px; color: #7dd3fc; }
+
+  .cursor { display: inline-block; width: 8px; height: 15px; background: #34d399; vertical-align: -2px; margin-left: 1px; animation: blink .8s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .verdict { margin-top: 16px; background: #1e293b; border-radius: 8px; padding: 14px 16px; font-size: 13px; line-height: 1.8; color: #cbd5e1; display: none; }
+  .verdict.show { display: block; }
+  .verdict b { color: #34d399; }
+  .verdict .red { color: #f87171; }
+
+  .fps-chip { margin-left: auto; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>SSE 流式渲染对比：全量蹦字 vs 打字机 + 行级增量</h1>
+  <div class="subtitle">模拟 SSE 突发到达（每 20~120ms 随机到达 2~10 字符）。<b style="color:#f87171">左侧红</b>：chunk 直接全量渲染（背景闪红 = 整篇被重新 parse）；<b style="color:#34d399">右侧绿</b>：缓冲队列 + 打字机吐字 + 行级冻结（只有绿色活跃行在重算）。</div>
+
+  <div class="controls">
+    <button class="run" id="btnStart">▶ 开始流式输出</button>
+    <button id="btnReset" disabled>🔄 重置</button>
+    <span class="ctl-label">文本量</span>
+    <select id="selLen">
+      <option value="short">标准回答（约 40 行）</option>
+      <option value="long">长文模式（约 250 行，看差距）</option>
+    </select>
+    <span class="ctl-label">打字速度</span>
+    <select id="selSpeed">
+      <option value="adaptive">自适应（推荐）</option>
+      <option value="slow">慢速优雅（1~2 字/帧）</option>
+      <option value="fast">极速（尽快播完）</option>
+    </select>
+    <span class="chip fps-chip" style="border:none;background:transparent">FPS <b id="fps">—</b></span>
+  </div>
+
+  <div class="pipeline">
+    <span class="chip">📡 最近到达 chunk <span class="mono" id="pipeChunk">—</span></span>
+    <span class="arrow">→</span>
+    <span class="chip">📦 打字机缓冲区 <b id="pipeBuf">0</b> 字</span>
+    <span class="arrow">→</span>
+    <span class="chip">🧊 已冻结行 <b id="pipeFrozen">0</b> 行（不再重算）</span>
+    <span class="arrow">→</span>
+    <span class="chip">✏️ 活跃行（唯一重算） <span class="mono" id="pipeActive">—</span></span>
+  </div>
+
+  <div class="compare-grid">
+    <div class="pane bad">
+      <div class="pane-head">
+        <span class="pane-title">❌ 方案 A：chunk 直接全量渲染</span>
+        <span class="pane-tag">来一块 · 蹦一块 · 整篇重 parse</span>
+      </div>
+      <div class="metrics">
+        <span>渲染调用 <b id="mLCount">0</b> 次</span>
+        <span>累计 parse <b id="mLChars">0</b> 字符</span>
+        <span>最近单次耗时 <b id="mLTime">0</b> ms</span>
+      </div>
+      <div class="doc" id="docL"></div>
+    </div>
+
+    <div class="pane good">
+      <div class="pane-head">
+        <span class="pane-title">✅ 方案 B：打字机 + 行级增量渲染</span>
+        <span class="pane-tag">缓冲队列 · 匀速吐字 · 只算活跃行</span>
+      </div>
+      <div class="metrics">
+        <span>渲染调用 <b id="mRCount">0</b> 次</span>
+        <span>累计 parse <b id="mRChars">0</b> 字符</span>
+        <span>最近单次耗时 <b id="mRTime">0</b> ms</span>
+      </div>
+      <div class="doc" id="docR"></div>
+    </div>
+  </div>
+
+  <div class="verdict" id="verdict"></div>
+</div>
+
+<script>
+// ================= 样本文本 =================
+const ESSAY = `# Redis 为什么快？
+
+主要有四个原因：
+
+- **纯内存操作**：数据都在内存里，避免了磁盘 IO
+- **单线程模型**：没有锁竞争，没有上下文切换开销
+- **IO 多路复用**：一个线程处理上万连接
+- **高效数据结构**：SDS、跳表、ziplist 都是精心设计的
+
+## 代码示例
+
+\`\`\`js
+const redis = new Redis();
+await redis.set('key', 'value');
+const v = await redis.get('key');
+\`\`\`
+
+## 什么时候不要用 Redis？
+
+数据量大到放不下内存、或者对持久化要求极高的场景，应该考虑 **MySQL + 缓存** 的组合方案。
+
+- 内存成本远高于磁盘
+- 极端场景下可能丢数据（AOF 也有窗口期）
+
+**结论**：缓存选 Redis，持久化选 MySQL，各司其职。
+`;
+
+function buildText(mode) {
+  if (mode === 'short') return ESSAY;
+  let t = ESSAY + '\n## 附：高频考点清单\n\n';
+  for (let i = 1; i <= 210; i++) {
+    t += '- 第 ' + i + ' 条考点：`知识点' + i + '` 的核心是**理解原理**而非背诵结论\n';
+  }
+  t += '\n**完。**';
+  return t;
+}
+
+// ================= 工具：极简 Markdown 行格式化 =================
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function inline(s) {
+  return esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code class="inl">$1</code>');
+}
+// 按行格式化（codeMode 由调用方按状态传入/更新）
+function formatLine(line, state) {
+  if (line.trim().startsWith('```')) {
+    state.code = !state.code;
+    return null; // 围栏行本身不渲染
+  }
+  if (state.code) return '<span class="md-code-line">' + esc(line) + '</span>';
+  if (line.startsWith('# '))  return '<span class="md-h1">' + inline(line.slice(2)) + '</span>';
+  if (line.startsWith('## ')) return '<span class="md-h2">' + inline(line.slice(3)) + '</span>';
+  if (line.startsWith('- '))  return '<span class="md-li">' + inline(line.slice(2)) + '</span>';
+  return '<span>' + (inline(line) || '&nbsp;') + '</span>';
+}
+
+// ================= 全局状态 =================
+let fullText = '', timer = null, rafId = null, running = false;
+
+// 方案 A：全量
+let aText = '', aCount = 0, aChars = 0;
+// 方案 B：打字机 + 行级
+let bBuffer = '', bActive = '', bFrozenCount = 0, bCount = 0, bChars = 0, bDone = false, bFinished = false;
+let bCodeState = { code: false };
+
+const $ = (id) => document.getElementById(id);
+const docL = $('docL'), docR = $('docR');
+
+// ================= 模拟 SSE：突发分块 =================
+function startStream() {
+  let pos = 0;
+  function push() {
+    if (pos >= fullText.length) { onStreamEnd(); return; }
+    const n = 2 + Math.floor(Math.random() * 9);           // 2~10 字符
+    const chunk = fullText.slice(pos, pos + n);
+    pos += n;
+    $('pipeChunk').textContent = JSON.stringify(chunk);
+    onChunkA(chunk);
+    onChunkB(chunk);
+    timer = setTimeout(push, 20 + Math.random() * 100);    // 20~120ms 突发
+  }
+  push();
+}
+
+// ================= 方案 A：chunk 直接全量渲染 =================
+function onChunkA(chunk) {
+  aText += chunk;
+  const t0 = performance.now();
+  // 整篇重新 parse（这就是问题所在）
+  const state = { code: false };
+  const lines = aText.split('\n');
+  let html = '';
+  for (const ln of lines) { const h = formatLine(ln, state); if (h) html += h; }
+  docL.innerHTML = html;
+  aCount++; aChars += aText.length;
+  $('mLCount').textContent = aCount;
+  $('mLChars').textContent = aChars.toLocaleString();
+  $('mLTime').textContent = (performance.now() - t0).toFixed(2);
+  // 整块闪红 = "这一帧整篇都被重算了"
+  docL.classList.remove('flash-all'); void docL.offsetWidth; docL.classList.add('flash-all');
+}
+
+// ================= 方案 B：缓冲队列 + 打字机 + 行级冻结 =================
+function onChunkB(chunk) { bBuffer += chunk; }
+
+function typewriterTick() {
+  const t0 = performance.now();
+  if (bBuffer.length > 0) {
+    // 自适应吐字
+    const mode = $('selSpeed').value;
+    let n;
+    if (mode === 'slow') n = 1 + Math.floor(Math.random() * 2);
+    else if (mode === 'fast') n = Math.max(10, Math.ceil(bBuffer.length / 8));
+    else n = Math.min(Math.max(2, Math.ceil(bBuffer.length / 30)), 20);
+    n = Math.min(n, bBuffer.length);
+
+    const take = bBuffer.slice(0, n);
+    bBuffer = bBuffer.slice(n);
+    bActive += take;
+
+    // 扫到换行：冻结完整行（parse 一次，永不再算）
+    let idx;
+    while ((idx = bActive.indexOf('\n')) !== -1) {
+      const line = bActive.slice(0, idx);
+      bActive = bActive.slice(idx + 1);
+      const h = formatLine(line, bCodeState);
+      if (h) {
+        const div = document.createElement('div');
+        div.innerHTML = h;
+        docR.appendChild(div);
+        bCount++; bChars += line.length;      // 这行只 parse 这一次
+        bFrozenCount++;
+      }
+    }
+    // 活跃行：唯一每帧重算的行
+    renderActiveLine();
+    autoScroll();
+  }
+  $('pipeBuf').textContent = bBuffer.length;
+  $('pipeFrozen').textContent = bFrozenCount;
+  $('pipeActive').textContent = bActive ? JSON.stringify(bActive.slice(-30)) : '—';
+  $('mRTime').textContent = (performance.now() - t0).toFixed(2);
+
+  if (!bFinished || bBuffer.length > 0 || bActive.length > 0) {
+    rafId = requestAnimationFrame(typewriterTick);
+  } else {
+    finishB();
+  }
+}
+
+function renderActiveLine() {
+  let el = docR.querySelector('.active-line');
+  if (!el) { el = document.createElement('div'); el.className = 'active-line'; docR.appendChild(el); }
+  const h = formatLine(bActive, { code: bCodeState.code }) || '<span></span>';
+  el.innerHTML = h + '<span class="cursor"></span>';
+  bCount++; bChars += bActive.length;         // 活跃行每帧都在重算
+  $('mRCount').textContent = bCount;
+  $('mRChars').textContent = bChars.toLocaleString();
+  // 闪绿：只有这一行在重算
+  el.classList.remove('active-line'); void el.offsetWidth; el.classList.add('active-line');
+}
+
+function autoScroll() { docR.scrollTop = docR.scrollHeight; docL.scrollTop = docL.scrollHeight; }
+
+function onStreamEnd() {
+  bFinished = true;
+  $('verdict').classList.add('show');
+}
+
+function finishB() {
+  // 排空：冻结最后的活跃行
+  const el = docR.querySelector('.active-line');
+  if (el) { el.classList.remove('active-line'); const c = el.querySelector('.cursor'); if (c) c.remove(); }
+  const save = (aChars / Math.max(bChars, 1)).toFixed(1);
+  $('verdict').innerHTML =
+    '✅ 播放完毕。方案 A 共渲染 <b class="red">' + aCount + '</b> 次、累计 parse <b class="red">' + aChars.toLocaleString() +
+    '</b> 字符；方案 B 渲染 ' + bCount + ' 次、累计 parse <b>' + bChars.toLocaleString() +
+    '</b> 字符。<b>方案 A 的 parse 量是方案 B 的 ' + save + ' 倍</b>——而且 A 的成本随文本变长持续劣化（O(n²)），B 每帧成本恒定（O(n)）。' +
+    '面试一句话：<b>“遇到换行就冻结，永远只重算最后一行。”</b>';
+}
+
+// ================= FPS =================
+let frames = 0, lastFpsT = performance.now();
+function fpsLoop() {
+  frames++;
+  const now = performance.now();
+  if (now - lastFpsT >= 1000) { $('fps').textContent = frames; frames = 0; lastFpsT = now; }
+  requestAnimationFrame(fpsLoop);
+}
+requestAnimationFrame(fpsLoop);
+
+// ================= 控制 =================
+$('btnStart').addEventListener('click', () => {
+  fullText = buildText($('selLen').value);
+  running = true;
+  $('btnStart').disabled = true; $('btnReset').disabled = false;
+  $('selLen').disabled = true; $('selSpeed').disabled = true;
+  rafId = requestAnimationFrame(typewriterTick);
+  startStream();
+});
+$('btnReset').addEventListener('click', () => location.reload());
+</script>
+</body>
+</html>

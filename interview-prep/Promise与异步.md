@@ -53,6 +53,76 @@ fetch("/api")
 
 .then() 返回新 Promise；普通返回值自动包装；catch 只捕获前面的错误。
 
+### 面试题：链式调用 + 异步任务队列（sleep）
+
+**题目**：实现 `Person`，支持 `person.sayHi().sleep(5).eat()`，按顺序输出
+`hello, i am jack` →(等 5 秒)→ `wake up` → `eat！`。
+
+**为什么不能同步 sleep**：JS 单线程，同步阻塞（如 `while(Date.now()-t<5000)`）会**卡死事件循环**，必须用异步队列 + `setTimeout` 制造真实等待。
+
+**解法一（推荐 · Promise 链队列）**
+
+```js
+class Person {
+  constructor(name) {
+    this.name = name;
+    this.queue = Promise.resolve(); // 任务链起点
+  }
+  sayHi() {
+    this.queue = this.queue.then(() => console.log(`hello, i am ${this.name}`));
+    return this; // 链式调用的前提
+  }
+  sleep(seconds) {
+    this.queue = this.queue.then(() => new Promise(resolve =>
+      setTimeout(() => { console.log('wake up'); resolve(); }, seconds * 1000)
+    ));
+    return this;
+  }
+  eat() {
+    this.queue = this.queue.then(() => console.log('eat！'));
+    return this;
+  }
+}
+```
+
+关键点：
+- `this.queue = this.queue.then(...)` 就是在链尾挂任务，**天然串行，无需独立启动器**。
+- 每个方法 `return this` 是链式调用的前提。
+- `sleep` 用一个真正 pending 的 Promise + `setTimeout` 制造"等待 5 秒"。
+
+**解法二（数组队列 + async 消费器）**
+
+```js
+class Person {
+  constructor(name) {
+    this.name = name;
+    this._tasks = [];
+    this._running = false;
+  }
+  _push(fn) { this._tasks.push(fn); this._kick(); }
+  async _kick() {
+    if (this._running) return;      // 守卫：防止重复消费导致乱序
+    this._running = true;
+    while (this._tasks.length) await this._tasks.shift()();
+    this._running = false;
+  }
+  sayHi() { this._push(() => console.log(`hello, i am ${this.name}`)); return this; }
+  eat()   { this._push(() => console.log('eat！')); return this; }
+  sleep(seconds) {
+    this._push(() => new Promise(resolve =>
+      setTimeout(() => { console.log('wake up'); resolve(); }, seconds * 1000)
+    ));
+    return this;
+  }
+}
+```
+
+优点：能拿到队列本身、可扩展并发/取消；缺点：要 `_running` 守卫防重复消费。
+
+**微任务时机（追问点）**：`sayHi` 的打印被包在 `.then` 里，是**微任务**。所以 `p.sayHi(); console.log('after')` 的顺序是 `after` → `hello`（先同步后微任务）。若要求"`sayHi` 同步立即打印"，需把打印放到 `.then` 外、只让 `sleep` 这类异步进队列。
+
+**边界**：任务 reject 会截断后续链，可 `.catch` 兜底；每次 `new Person` 队列互相独立。
+
 ### new Promise 的正确使用场景 — Promisify（回调转 Promise）
 
 **`new Promise` 的根本用途**：将回调/事件风格的异步 API 包装成 Promise，解决回调地狱。

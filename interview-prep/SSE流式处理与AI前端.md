@@ -486,3 +486,69 @@ requestIdleCallback((deadline) => {
 - **移出的任务**：Markdown parse + 语法高亮、大列表 filter/sort、文件分片 MD5（spark-md5）、大 JSON parse、图片压缩
 - **判断标准（四条件同时满足）**：纯计算无 DOM + 数据可序列化 + 耗时 > 16ms + 可异步拿结果
 - **不能丢进去的**：① DOM/BOM 操作（Worker 无 document/window，硬限制）；② 需同步返回的（通信天然异步）；③ 小任务（序列化成本 > 计算本身）；④ 高频小消息（考虑 SharedArrayBuffer + Atomics，但需 COOP/COEP 跨域隔离，成本高）
+
+### A6. 断点续传的服务端设计（eventId/会话定位/重放缓存）
+
+**eventId 定义**：把路由信息编码进 id——`{conversationId}:{seq}`（会话内自增序号）。后端每个 chunk 带 `id:` 字段下发，浏览器 EventSource 自动记录，重连自动带 `Last-Event-ID` 头（协议内置，前端零代码）。
+
+**怎么定位会话**：解析 `Last-Event-ID` → conversationId + 断点 seq；再用请求的用户 token 校验该会话 owner（防越权续传）。**不需要单独的 id→会话映射表，id 自身编码了路由信息**（题眼）。
+
+**内容缓存与续传（边生成边缓冲）**：
+- 为什么缓存：LLM 生成贵且有随机性，断线重生成不可接受
+- 写路径：模型 chunk → 分配 seq → 写 Redis List（`sse:buf:{convId}`，TTL ~30min）→ 推给在线客户端（Pub/Sub）
+- 读路径（重连）：重放 List 中 seq > 断点的事件 → 若仍在生成，订阅同一 Pub/Sub channel 续流 → 生成完发 `event: done`
+- 生成完成：落库 DB 永久保存，缓冲留短 TTL 兜底
+
+**边界情况**：
+- 缓冲过期（TTL 过了）→ 查 DB 全量返回（已完成）
+- 多实例部署：缓冲/广播必须共享存储（Redis），不能单机内存——选 Redis 的核心原因
+- Last-Event-ID 非法/太老 → 发 `event: resync` 约定事件让前端全量刷新
+
+### A7. 打字机效果：缓冲队列 + 定速消费（rAF 渲一段蹦一段的修复）
+
+**问题根因**：渲染节奏被网络节奏绑架——SSE 突发到达，来一块渲一块就是"蹦字"。
+
+**核心方案**：生产消费解耦。SSE 到达 → 缓冲队列；rAF 消费循环每帧吐 N 字 → 渲染。
+
+```js
+let buffer = '', rendered = '', finished = false;
+function onChunk(text) { buffer += text; }           // 只进缓冲，不渲染
+function tick() {
+  if (buffer.length > 0) {
+    const n = Math.min(Math.max(2, Math.ceil(buffer.length / 30)), 20); // 自适应：积压越多吐越快
+    rendered += buffer.slice(0, n); buffer = buffer.slice(n);
+    setContent(rendered);                            // 一帧一次 setState，非一字一次
+  }
+  if (!finished || buffer.length > 0) requestAnimationFrame(tick); // 结束后排空缓冲
+}
+```
+
+**关键细节**：
+1. setState 一帧一次（60fps），不是一字符一次
+2. **自适应吐字**：`ceil(buffer/30)`，积压暴冲时自动加速追平；永不掉队
+3. **结束后排空**：done 时缓冲有存货，播完再停，防结尾被吞
+4. 停止按钮：立即 flush 全量（rendered += buffer）
+5. 代码块吐到一半围栏未闭合 → 用分块渲染的"未闭合按纯文本"特例
+
+**与分块渲染的配合（性能链）**：打字机只改末尾 → 分块方案里只有尾块重 parse → 前块 memo 全命中 → **每帧成本恒定，不随文本变长劣化**。面试被问"打字机卡不卡"就答这条链。
+
+参数体感：每帧 1~2 字偏优雅，2~4 字主流（ChatGPT 体感），上限 20 字兜底。rAF vs setInterval(30~50ms)：效果等价，rAF 跟刷新率、页面不可见自动暂停更优。
+
+### A8. 行级增量渲染（用具体例子理解分块思想）
+
+**核心思想**：遇到换行就"冻结"该行，永远只重算最后一行（活跃行）。
+
+**流式示例**：最终输出 `# 方案对比 / 推荐用 Redis，原因如下： / - 支持持久化 / - 性能高 / - 生态成熟`
+
+| 新到内容 | frozenLines（不再碰） | activeLine（唯一重渲染） |
+|---|---|---|
+| `# 方案` | （空） | `# 方案` |
+| `对比\n\n` | `# 方案对比` ← 遇 `\n` 冻结 | （空） |
+| `原因如下：\n\n- ` | + `推荐用 Redis，原因如下：` | `- ` |
+| `支持持久化\n- ` | + `- 支持持久化` | `- ` |
+
+**实现**：每行一个 memo 组件（text 不变则 bailout），frozenLines 全部命中缓存，activeLine 是唯一重渲染行。行拆分：activeLine 里扫到 `\n` 就切出冻结。
+
+**成本对比**（1000 行输出 / 500 帧）：全量渲染 ≈ 25 万行次 parse；行级增量 ≈ 每行只 parse 一次 + 活跃行重算，**差 200+ 倍且每帧成本恒定**。
+
+**与块级分块的关系**：行级是块级的简化版，思路一致（冻结已完成、只算进行中）；生产用块级边界（空行/围栏/表格）是为了 Markdown 语义完整——长段落不换行时行级会退化成"活跃行很大"，代码块跨行语义会被行级切断。
