@@ -41,6 +41,7 @@
 - [前端测试-TDD实战](./前端测试-TDD实战.md) — xDD 全家桶辨析（TDD/BDD/CDD/ATDD）、红绿重构实操（formatThousands/chunk 案例）、client/ vitest 基建、前端 TDD 适用范围与面试话术（2026-09-06）
 - [前端测试-BDD与E2E](./前端测试-BDD与E2E.md) — E2E 工具演进（Selenium→Cypress→Playwright）、Cucumber 零件vs整车、playwright-bdd 三层文件模型、feature 编写规范、产物目录分工、AI 协作流、双 MCP 调试体系（Playwright MCP 操作 + Chrome DevTools MCP 诊断）、完整 AI 工作流闭环、flaky 治理（2026-09-06）
 - [AI开发流程-SDD+BDD+TDD](./AI开发流程-SDD-BDD-TDD.md) — AI 时代个人开发流程话术：SDD(Spec Kit/OpenSpec)定边界、BDD(Gherkin)定验收、TDD 定正确性、BDD≠Playwright 纠偏、库存扣减贯穿案例、落地三档、高频追问 Q&A（2026-09-08）
+- [SpecKit实战-商品下单Demo](./SpecKit实战-商品下单Demo.md) — Spec Kit 七步全流程实操复盘：constitution→specify→clarify→plan→tasks→analyze→implement，4 个「人审时刻」、24 测试全绿含 100 并发防超卖实测、60 秒面试话术、迭代管理规范（编号档案/主规格保鲜/反模式）与追问 Q&A（2026-09-09）
 - [SSE流式处理与AI前端](./SSE流式处理与AI前端.md) — 2026大厂新增独立考点：SSE vs WebSocket、Fetch+ReadableStream、粘包半包、断线重连+指数退避、流式Markdown增量渲染、打字机性能优化
 
 ## 四、进阶专题

@@ -11,10 +11,10 @@ import { AgentChatDto } from './dto/agent-chat.dto';
 
 @Controller('api/agent')
 export class AgentController {
-  constructor(private readonly agentService: AgentService) {}
+  constructor(private readonly agentService: AgentService) { }
 
   @Post('chat')
-  chat(@Body() body: AgentChatDto) {
+  chat (@Body() body: AgentChatDto) {
     return this.agentService.chat({
       userId: body.userId,
       conversationId: body.conversationId,
@@ -26,7 +26,7 @@ export class AgentController {
   // SSE 流式对话：前端边接收边渲染，工具调用轨迹与思考过程也走同一通道
   // @Sse 只支持 GET，这里手动写 SSE 响应，保持 POST + body 参数
   @Post('chat/stream')
-  async chatStream(
+  async chatStream (
     @Req() req: Request,
     @Res() res: Response,
     @Body() body: AgentChatDto,
@@ -40,10 +40,11 @@ export class AgentController {
     const abort = new AbortController();
     // 客户端断开时中止上游 DeepSeek 请求，避免服务端继续空耗 token
     req.on('close', () => abort.abort());
-
+    let idx = 0
     const write = (event: AgentStreamEvent) => {
       if (res.writableEnded || res.destroyed) return;
       const { kind, ...data } = event;
+      res.write(`id: ${idx++}\n`);
       res.write(`event: ${kind}\n`);
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };

@@ -49,10 +49,10 @@ export class AgentService {
     // 供应商注册表：按 input.provider 取用，新增供应商只需在 AgentModule 注册
     @Inject(MODEL_PROVIDERS)
     private readonly providers: Map<string, ModelProvider>,
-  ) {}
+  ) { }
 
   // 加会话回复锁 + 登记 MQ 卡死检查；返回 null 表示抢锁失败
-  private async acquireReplyLock(
+  private async acquireReplyLock (
     conversationId: string,
   ): Promise<{ lockKey: string; token: string } | null> {
     const lockKey = `lock:conv:${conversationId}:reply`;
@@ -65,7 +65,7 @@ export class AgentService {
     return { lockKey, token };
   }
 
-  private resolveProvider(name?: string): ModelProvider {
+  private resolveProvider (name?: string): ModelProvider {
     const key = name ?? 'deepseek';
     const provider = this.providers.get(key);
     if (!provider) {
@@ -74,7 +74,7 @@ export class AgentService {
     return provider;
   }
 
-  async chat(input: AgentChatInput) {
+  async chat (input: AgentChatInput) {
     const provider = this.resolveProvider(input.provider);
     const ctx = await this.prepareChat(input);
     const { conversationId, messages, toolDefinitions } = ctx;
@@ -140,7 +140,7 @@ export class AgentService {
   }
 
   // 流式对话：边生成边把 reasoning/content/工具轨迹透传给前端，结束后落库
-  async *chatStream(
+  async *chatStream (
     input: AgentChatInput,
     signal?: AbortSignal,
   ): AsyncGenerator<AgentStreamEvent> {
@@ -177,6 +177,7 @@ export class AgentService {
           toolDefinitions,
           signal,
         )) {
+          console.log('stream event', event);
           if (event.kind === 'usage') {
             usage = this.mergeUsage(usage, event.usage);
             yield event;
@@ -270,7 +271,7 @@ export class AgentService {
     }
   }
 
-  private async prepareChat(input: AgentChatInput) {
+  private async prepareChat (input: AgentChatInput) {
     if (!input.message?.trim()) throw new BadRequestException('message 必填');
     // 用户必须真实存在（不存在时 service 抛 404）
     await this.conversationService.getUserById(input.userId);
@@ -318,7 +319,7 @@ export class AgentService {
     return { conversationId, messages, toolDefinitions };
   }
 
-  private parseToolArguments(raw: string): Record<string, unknown> {
+  private parseToolArguments (raw: string): Record<string, unknown> {
     try {
       return JSON.parse(raw) as Record<string, unknown>;
     } catch {
@@ -328,7 +329,7 @@ export class AgentService {
   }
 
   // 工具循环可能多次请求模型，用量按字段累加，方便整体展示/统计
-  private mergeUsage(
+  private mergeUsage (
     target: MessageUsage | null,
     next: MessageUsage | null,
   ): MessageUsage | null {
